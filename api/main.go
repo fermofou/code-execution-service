@@ -12,6 +12,7 @@ import (
 	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
+	"github.com/jackc/pgx/v4/pgxpool"
 )
 
 var ctx = context.Background()
@@ -20,6 +21,8 @@ var ctx = context.Background()
 var rdb = redis.NewClient(&redis.Options{
 	Addr: os.Getenv("REDIS_ADDR"),
 })
+
+var db *pgxpool.Pool
 
 type CodeRequest struct {
 	Language string `json:"language"`
@@ -41,6 +44,39 @@ type JobResult struct {
 	ExecTime  int64     `json:"exec_time_ms"`
 	Timestamp time.Time `json:"timestamp"`
 }
+
+type Reward struct {
+	RewardID        int    `json:"reward_id"`
+	Name            string `json:"name"`
+	Description     string `json:"description"`
+	InventoryCount  int    `json:"inventory_count"`
+	Cost            int    `json:"cost"`
+}
+
+type Claim struct {
+	UserID   int `json:"user_id"`
+	RewardID int `json:"reward_id"`
+}
+
+type ClaimResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+}
+
+func connectToDB() {
+    var err error
+    databaseURL := os.Getenv("DATABASE_URL")
+    if databaseURL == "" {
+        databaseURL = "imanol.postgres"
+    }
+
+    
+    db, err = pgxpool.Connect(ctx, databaseURL)
+    if err != nil {
+        log.Fatalf("Unable to connect to database: %v\n", err)
+    }
+}
+
 
 func executeHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -123,16 +159,49 @@ func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `{"status": "ok"}`)
 }
 
+func claimHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var claim Claim
+	if err := json.NewDecoder(r.Body).Decode(&claim); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	// Insert claim into the database
+	_, err := db.Exec(ctx, "INSERT INTO Claims (user_id, reward_id) VALUES ($1, $2)", claim.UserID, claim.RewardID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to insert claim: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Respond with success
+	response := ClaimResponse{
+		Success: true,
+		Message: "Claim successfully created",
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
 func main() {
 	// Set default Redis address if not provided
 	if os.Getenv("REDIS_ADDR") == "" {
 		os.Setenv("REDIS_ADDR", "localhost:6379")
 	}
 
+	// Connect to the database
+	connectToDB()
+	defer db.Close()
+
 	router := mux.NewRouter()
 	router.HandleFunc("/execute", executeHandler).Methods("POST")
 	router.HandleFunc("/result/{id}", resultHandler).Methods("GET")
 	router.HandleFunc("/health", healthCheckHandler).Methods("GET")
+	router.HandleFunc("/claim", claimHandler).Methods("POST")
 
 	log.Println("API server running on port 8080")
 	log.Fatal(http.ListenAndServe(":8080", router))
