@@ -67,7 +67,7 @@ func connectToDB() {
     var err error
     databaseURL := os.Getenv("DATABASE_URL")
     if databaseURL == "" {
-        databaseURL = "postgres://avnadmin:AVNS_nXjW1vR5VwGXzOzuXQ-@postgres-moran-tec-c540.j.aivencloud.com:13026/defaultdb?sslmode=require"
+        databaseURL = "imanol.terminator"
     }
 
     
