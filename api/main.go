@@ -67,7 +67,7 @@ func connectToDB() {
     var err error
     databaseURL := os.Getenv("DATABASE_URL")
     if databaseURL == "" {
-        databaseURL = "imanol.postgres"
+        databaseURL = "postgres://avnadmin:AVNS_nXjW1vR5VwGXzOzuXQ-@postgres-moran-tec-c540.j.aivencloud.com:13026/defaultdb?sslmode=require"
     }
 
     
@@ -187,6 +187,44 @@ func claimHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+func getRewardsHandler(w http.ResponseWriter, r *http.Request) {
+    rows, err := db.Query(ctx, "SELECT reward_id, name, description, inventory_count, cost FROM Reward")
+    if err != nil {
+        http.Error(w, "Failed to retrieve rewards", http.StatusInternalServerError)
+        return
+    }
+    defer rows.Close()
+
+    var rewards []Reward
+    for rows.Next() {
+        var reward Reward
+        if err := rows.Scan(&reward.RewardID, &reward.Name, &reward.Description, &reward.InventoryCount, &reward.Cost); err != nil {
+            http.Error(w, "Failed to scan reward", http.StatusInternalServerError)
+            return
+        }
+        rewards = append(rewards, reward)
+    }
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(rewards)
+}
+
+// CORS middleware to allow all origins
+func handleCORS(w http.ResponseWriter, r *http.Request) {
+	// Allow all origins
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	// Allow specific methods
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+	// Allow specific headers
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+	// If it's a preflight request, just respond with 200
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+}
+
+
 func main() {
 	// Set default Redis address if not provided
 	if os.Getenv("REDIS_ADDR") == "" {
@@ -198,10 +236,20 @@ func main() {
 	defer db.Close()
 
 	router := mux.NewRouter()
+
+	// Apply CORS handler before every route
+	router.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			handleCORS(w, r) // Handle CORS
+			next.ServeHTTP(w, r)
+		})
+	})
+
 	router.HandleFunc("/execute", executeHandler).Methods("POST")
 	router.HandleFunc("/result/{id}", resultHandler).Methods("GET")
 	router.HandleFunc("/health", healthCheckHandler).Methods("GET")
 	router.HandleFunc("/claim", claimHandler).Methods("POST")
+	router.HandleFunc("/rewards", getRewardsHandler).Methods("GET")
 
 	log.Println("API server running on port 8080")
 	log.Fatal(http.ListenAndServe(":8080", router))
