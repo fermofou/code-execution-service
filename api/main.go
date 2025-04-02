@@ -29,6 +29,12 @@ type CodeRequest struct {
 	Code     string `json:"code"`
 }
 
+type User struct {
+	Name string `json:"name"`
+	Points int   `json:"points"`
+	Level int    `json:"level"`
+}
+
 type Job struct {
 	ID        string    `json:"id"`
 	Language  string    `json:"language"`
@@ -67,7 +73,7 @@ func connectToDB() {
     var err error
     databaseURL := os.Getenv("DATABASE_URL")
     if databaseURL == "" {
-        databaseURL = "imanol.terminator"
+        databaseURL = "IMANOLELGOAT"
     }
 
     
@@ -208,6 +214,29 @@ func getRewardsHandler(w http.ResponseWriter, r *http.Request) {
     json.NewEncoder(w).Encode(rewards)
 }
 
+func leaderboardHandler(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Query(ctx, `SELECT name, points, level FROM "User" WHERE is_admin = false ORDER BY points DESC LIMIT 10`)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to fetch leaderboard: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var users []User
+	for rows.Next() {
+		var u User
+		if err := rows.Scan(&u.Name, &u.Points, &u.Level); err != nil {
+			http.Error(w, "Failed to scan user", http.StatusInternalServerError)
+			return
+		}
+		users = append(users, u)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(users)
+}
+
+
 // CORS middleware to allow all origins
 func handleCORS(w http.ResponseWriter, r *http.Request) {
 	// Allow all origins
@@ -250,6 +279,7 @@ func main() {
 	router.HandleFunc("/health", healthCheckHandler).Methods("GET")
 	router.HandleFunc("/claim", claimHandler).Methods("POST")
 	router.HandleFunc("/rewards", getRewardsHandler).Methods("GET")
+	router.HandleFunc("/leaderboard", leaderboardHandler).Methods("GET")
 
 	log.Println("API server running on port 8080")
 	log.Fatal(http.ListenAndServe(":8080", router))
