@@ -69,11 +69,32 @@ type ClaimResponse struct {
 	Message string `json:"message"`
 }
 
+	// Define problem structure
+type ProblemSmall struct {
+	ProblemID   int    `json:"problem_id"`
+	Title       string `json:"title"`
+	Difficulty  int `json:"difficulty"`
+	Solved     *bool   `json:"solved"` // pointer to allow NULL		
+}
+//parte
+type Problem struct {
+	ProblemID   int    `json:"problem_id"`
+	Title       string `json:"title"`
+	Difficulty  int `json:"difficulty"`
+	Solved     *bool   `json:"solved"` // pointer to allow NULL
+	TimeLimit   int    `json:"timelimit"`
+	Tests       string `json:"tests"`
+	MemoryLimit int    `json:"memorylimit"`
+	Question    string `json:"question"`
+	Inputs      []string `json:"inputs"`
+	Outputs     []string `json:"outputs"`
+}
+
 func connectToDB() {
     var err error
     databaseURL := os.Getenv("DATABASE_URL")
     if databaseURL == "" {
-        databaseURL = "IMANOLELGOAT"
+        databaseURL = "postgres://avnadmin:AVNS_lOhjYg-hwx2CdWSGKk_@postgres-moran-tec-c540.j.aivencloud.com:13026/defaultdb?sslmode=require"
     }
 
     
@@ -236,6 +257,137 @@ func leaderboardHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(users)
 }
 
+func getAllProblems(w http.ResponseWriter, r *http.Request) {
+	// Set headers
+	w.Header().Set("Content-Type", "application/json")
+	
+	// Extract user ID from query parameters
+	userID := r.URL.Query().Get("userId")
+	if userID == "" {
+		http.Error(w, "Missing required query parameter: userId", http.StatusBadRequest)
+		return
+	}
+
+	// Query to get all problems from the database
+	rows, err := db.Query(ctx, `SELECT 
+    p.problem_id,
+    p.title,
+    p.difficulty,
+    CASE 
+        WHEN MAX(CASE WHEN s.correct = true THEN 1 ELSE 0 END) = 1 THEN true
+        WHEN COUNT(s.submission_id) > 0 THEN false
+        ELSE NULL
+    END AS solved
+	FROM 
+    	problem p
+	LEFT JOIN 
+    	submission s ON p.problem_id = s.problem_id AND s.user_id = $1
+	GROUP BY 
+    	p.problem_id, p.title, p.difficulty
+	ORDER BY 
+    	p.problem_id;
+`, userID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to retrieve problems: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var problems []ProblemSmall
+	for rows.Next() {
+		var p ProblemSmall
+		if err := rows.Scan(&p.ProblemID, &p.Title, &p.Difficulty, &p.Solved); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to scan problem: %v", err), http.StatusInternalServerError)
+			return
+		}
+		problems = append(problems, p)
+	}
+
+	// Check for errors after iterating through rows
+	if err = rows.Err(); err != nil {
+		http.Error(w, fmt.Sprintf("Error iterating through problems: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Encode and return the problems as JSON
+	if err := json.NewEncoder(w).Encode(problems); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to encode problems: %v", err), http.StatusInternalServerError)
+		return
+	}
+}
+//parte
+func getChallengeId(w http.ResponseWriter, r *http.Request) {
+	// Set headers
+	w.Header().Set("Content-Type", "application/json")
+	
+	// Extract user ID and probID from query parameters
+	userID := r.URL.Query().Get("userID")
+	if userID == "" {
+		http.Error(w, "Missing required query parameter: userID", http.StatusBadRequest)
+		return
+	}
+	probID := r.URL.Query().Get("probID")
+	if probID == "" {
+		http.Error(w, "Missing required query parameter: probID", http.StatusBadRequest)
+		return
+	}
+
+	// Query to get all problems from the database
+	rows, err := db.Query(ctx, `   
+   SELECT 
+    p.problem_id,  -- Include the problem_id in your query result
+    p.title,
+    p.difficulty,
+    p.question,
+    p.inputs,
+    p.outputs,
+    p.timelimit,
+    p.memorylimit,
+    p.tests,
+    -- Add the logic for the 'solved' field
+    CASE 
+        WHEN MAX(CASE WHEN s.correct = true THEN 1 ELSE 0 END) = 1 THEN true
+        WHEN MAX(CASE WHEN s.correct = false THEN 1 ELSE 0 END) = 1 THEN false
+        ELSE NULL
+    END AS solved
+FROM 
+    problem p
+LEFT JOIN 
+    submission s ON p.problem_id = s.problem_id AND s.user_id = $1
+WHERE 
+    p.problem_id = $2
+GROUP BY 
+    p.problem_id, p.title, p.difficulty, p.question, p.inputs, p.outputs, p.timelimit, p.memorylimit, p.tests;
+ 
+`, userID, probID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to retrieve problems: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	// Create a Problem struct
+	var problem Problem
+	if rows.Next() {
+		err := rows.Scan(&problem.ProblemID, &problem.Title, &problem.Difficulty, &problem.Question, &problem.Inputs, &problem.Outputs, &problem.TimeLimit, &problem.MemoryLimit, &problem.Tests, &problem.Solved)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to scan problem: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Check for errors after iterating through rows
+	if err := rows.Err(); err != nil {
+		http.Error(w, fmt.Sprintf("Error iterating through problems: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Encode and return the problem as JSON
+	if err := json.NewEncoder(w).Encode(problem); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to encode problem: %v", err), http.StatusInternalServerError)
+		return
+	}
+}
 
 // CORS middleware to allow all origins
 func handleCORS(w http.ResponseWriter, r *http.Request) {
@@ -280,6 +432,8 @@ func main() {
 	router.HandleFunc("/claim", claimHandler).Methods("POST")
 	router.HandleFunc("/rewards", getRewardsHandler).Methods("GET")
 	router.HandleFunc("/leaderboard", leaderboardHandler).Methods("GET")
+	router.HandleFunc("/problems", getAllProblems).Methods("GET")
+	router.HandleFunc("/challenge",getChallengeId).Methods("GET")
 
 	log.Println("API server running on port 8080")
 	log.Fatal(http.ListenAndServe(":8080", router))
