@@ -30,9 +30,9 @@ type CodeRequest struct {
 }
 
 type User struct {
-	Name string `json:"name"`
-	Points int   `json:"points"`
-	Level int    `json:"level"`
+	Name   string `json:"name"`
+	Points int    `json:"points"`
+	Level  int    `json:"level"`
 }
 
 type Job struct {
@@ -52,11 +52,11 @@ type JobResult struct {
 }
 
 type Reward struct {
-	RewardID        int    `json:"reward_id"`
-	Name            string `json:"name"`
-	Description     string `json:"description"`
-	InventoryCount  int    `json:"inventory_count"`
-	Cost            int    `json:"cost"`
+	RewardID       int    `json:"reward_id"`
+	Name           string `json:"name"`
+	Description    string `json:"description"`
+	InventoryCount int    `json:"inventory_count"`
+	Cost           int    `json:"cost"`
 }
 
 type Claim struct {
@@ -69,41 +69,50 @@ type ClaimResponse struct {
 	Message string `json:"message"`
 }
 
-	// Define problem structure
+// Define problem structure
 type ProblemSmall struct {
-	ProblemID   int    `json:"problem_id"`
-	Title       string `json:"title"`
-	Difficulty  int `json:"difficulty"`
-	Solved     *bool   `json:"solved"` // pointer to allow NULL		
+	ProblemID  int    `json:"problem_id"`
+	Title      string `json:"title"`
+	Difficulty int    `json:"difficulty"`
+	Solved     *bool  `json:"solved"` // pointer to allow NULL
 }
-//parte
+
+// parte
 type Problem struct {
-	ProblemID   int    `json:"problem_id"`
-	Title       string `json:"title"`
-	Difficulty  int `json:"difficulty"`
-	Solved     *bool   `json:"solved"` // pointer to allow NULL
-	TimeLimit   int    `json:"timelimit"`
-	Tests       string `json:"tests"`
-	MemoryLimit int    `json:"memorylimit"`
-	Question    string `json:"question"`
+	ProblemID   int      `json:"problem_id"`
+	Title       string   `json:"title"`
+	Difficulty  int      `json:"difficulty"`
+	Solved      *bool    `json:"solved"` // pointer to allow NULL
+	TimeLimit   int      `json:"timelimit"`
+	Tests       string   `json:"tests"`
+	MemoryLimit int      `json:"memorylimit"`
+	Question    string   `json:"question"`
 	Inputs      []string `json:"inputs"`
 	Outputs     []string `json:"outputs"`
 }
 
-func connectToDB() {
-    var err error
-    databaseURL := os.Getenv("DATABASE_URL")
-    if databaseURL == "" {
-        databaseURL = "postgres://avnadmin:AVNS_lOhjYg-hwx2CdWSGKk_@postgres-moran-tec-c540.j.aivencloud.com:13026/defaultdb?sslmode=require"
-    }
-
-    
-    db, err = pgxpool.Connect(ctx, databaseURL)
-    if err != nil {
-        log.Fatalf("Unable to connect to database: %v\n", err)
-    }
+type UploadProblemFormat struct {
+	Title       string `json:"title"`
+	Difficulty  int    `json:"difficulty"`
+	TimeLimit   int    `json:"timelimit"`
+	SampleTests string `json:"sampletests"`
+	MemoryLimit int    `json:"memorylimit"`
+	Question    string `json:"question"`
+	// Tags        []string `json:"tags"`
 }
 
+func connectToDB() {
+	var err error
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		databaseURL = "postgres://avnadmin:AVNS_lOhjYg-hwx2CdWSGKk_@postgres-moran-tec-c540.j.aivencloud.com:13026/defaultdb?sslmode=require"
+	}
+
+	db, err = pgxpool.Connect(ctx, databaseURL)
+	if err != nil {
+		log.Fatalf("Unable to connect to database: %v\n", err)
+	}
+}
 
 func executeHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -215,24 +224,24 @@ func claimHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func getRewardsHandler(w http.ResponseWriter, r *http.Request) {
-    rows, err := db.Query(ctx, "SELECT reward_id, name, description, inventory_count, cost FROM Reward")
-    if err != nil {
-        http.Error(w, "Failed to retrieve rewards", http.StatusInternalServerError)
-        return
-    }
-    defer rows.Close()
+	rows, err := db.Query(ctx, "SELECT reward_id, name, description, inventory_count, cost FROM Reward")
+	if err != nil {
+		http.Error(w, "Failed to retrieve rewards", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
 
-    var rewards []Reward
-    for rows.Next() {
-        var reward Reward
-        if err := rows.Scan(&reward.RewardID, &reward.Name, &reward.Description, &reward.InventoryCount, &reward.Cost); err != nil {
-            http.Error(w, "Failed to scan reward", http.StatusInternalServerError)
-            return
-        }
-        rewards = append(rewards, reward)
-    }
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(rewards)
+	var rewards []Reward
+	for rows.Next() {
+		var reward Reward
+		if err := rows.Scan(&reward.RewardID, &reward.Name, &reward.Description, &reward.InventoryCount, &reward.Cost); err != nil {
+			http.Error(w, "Failed to scan reward", http.StatusInternalServerError)
+			return
+		}
+		rewards = append(rewards, reward)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(rewards)
 }
 
 func leaderboardHandler(w http.ResponseWriter, r *http.Request) {
@@ -260,7 +269,7 @@ func leaderboardHandler(w http.ResponseWriter, r *http.Request) {
 func getAllProblems(w http.ResponseWriter, r *http.Request) {
 	// Set headers
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	// Extract user ID from query parameters
 	userID := r.URL.Query().Get("userId")
 	if userID == "" {
@@ -315,11 +324,12 @@ func getAllProblems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 }
-//parte
+
+// parte
 func getChallengeId(w http.ResponseWriter, r *http.Request) {
 	// Set headers
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	// Extract user ID and probID from query parameters
 	userID := r.URL.Query().Get("userID")
 	if userID == "" {
@@ -389,6 +399,52 @@ GROUP BY
 	}
 }
 
+func uploadProblemStatement(w http.ResponseWriter, r *http.Request) {
+	var problem UploadProblemFormat
+	if err := json.NewDecoder(r.Body).Decode(&problem); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+	rows, err := db.Query(ctx,
+		`INSERT INTO problem (title, difficulty, timelimit, memorylimit, question, answer, inputs, outputs, tests)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING problem_id`,
+		problem.Title, problem.Difficulty, problem.TimeLimit, problem.MemoryLimit, problem.Question, " ", []string{}, []string{}, problem.SampleTests)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to insert problem: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	defer rows.Close()
+	var problemID int
+
+	if rows.Next() {
+		if err := rows.Scan(&problemID); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to scan problem ID: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if err = rows.Err(); err != nil {
+		http.Error(w, fmt.Sprintf("Error iterating through problems: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	response := struct {
+		Status    string `json:"status"`
+		ProblemID int    `json:"problem_id"`
+	}{
+		Status:    "success",
+		ProblemID: problemID,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		fmt.Printf("Failed to encode response: %v\n", err)
+		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+		return
+	}
+}
+
 // CORS middleware to allow all origins
 func handleCORS(w http.ResponseWriter, r *http.Request) {
 	// Allow all origins
@@ -404,7 +460,6 @@ func handleCORS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 }
-
 
 func main() {
 	// Set default Redis address if not provided
@@ -433,7 +488,8 @@ func main() {
 	router.HandleFunc("/rewards", getRewardsHandler).Methods("GET")
 	router.HandleFunc("/leaderboard", leaderboardHandler).Methods("GET")
 	router.HandleFunc("/problems", getAllProblems).Methods("GET")
-	router.HandleFunc("/challenge",getChallengeId).Methods("GET")
+	router.HandleFunc("/challenge", getChallengeId).Methods("GET")
+	router.HandleFunc("/admin/uploadProblemStatement", uploadProblemStatement).Methods("POST", "OPTIONS")
 
 	log.Println("API server running on port 8080")
 	log.Fatal(http.ListenAndServe(":8080", router))
