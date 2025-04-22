@@ -1,8 +1,6 @@
 module leetcode-clone
 
-go 1.21
-
-toolchain go1.24.1
+go 1.19
 
 require (
 	github.com/go-redis/redis/v8 v8.11.5
