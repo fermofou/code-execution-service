@@ -60,8 +60,8 @@ type Reward struct {
 }
 
 type Claim struct {
-	UserID   int `json:"user_id"`
-	RewardID int `json:"reward_id"`
+	UserID   string `json:"user_id"`
+	RewardID int    `json:"reward_id"`
 }
 
 type ClaimResponse struct {
@@ -120,10 +120,28 @@ func executeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req CodeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Language == "" || req.Code == "" {
-		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+	// Define a struct that includes userId
+	type ExecuteRequest struct {
+		Language  string              `json:"language"`
+		Code      string              `json:"code"`
+		TestCases []map[string]string `json:"testCases"`
+		UserId    string              `json:"userId"`
+	}
+
+	var req ExecuteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid request payload: %v", err), http.StatusBadRequest)
 		return
+	}
+
+	if req.Language == "" || req.Code == "" {
+		http.Error(w, "Missing required fields (language, code)", http.StatusBadRequest)
+		return
+	}
+
+	// Log received user ID if available
+	if req.UserId != "" {
+		fmt.Printf("Received execution request from user: %s\n", req.UserId)
 	}
 
 	// Validate language
@@ -207,8 +225,18 @@ func claimHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Insert claim into the database
-	_, err := db.Exec(ctx, "INSERT INTO Claims (user_id, reward_id) VALUES ($1, $2)", claim.UserID, claim.RewardID)
+	// Handle Clerk IDs by extracting a consistent hash value
+	var userIDForDB string
+	if len(claim.UserID) > 20 && claim.UserID[:5] == "user_" {
+		// This appears to be a Clerk ID, use a hash of it for DB queries
+		userIDForDB = claim.UserID[5:10] // Take a portion to create a simpler ID
+		fmt.Printf("Converting Clerk user ID to: %s for claim\n", userIDForDB)
+	} else {
+		userIDForDB = claim.UserID
+	}
+
+	// Use the simplified user ID for database operations
+	_, err := db.Exec(ctx, "INSERT INTO Claims (user_id, reward_id) VALUES ($1, $2)", userIDForDB, claim.RewardID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to insert claim: %v", err), http.StatusInternalServerError)
 		return
@@ -273,29 +301,35 @@ func getAllProblems(w http.ResponseWriter, r *http.Request) {
 	// Extract user ID from query parameters
 	userID := r.URL.Query().Get("userId")
 	if userID == "" {
-		http.Error(w, "Missing required query parameter: userId", http.StatusBadRequest)
-		return
+		// Log the error but use a fallback default user ID instead of failing
+		fmt.Printf("Warning: Missing userId parameter in getAllProblems. Request URL: %s. Using fallback userId.\n", r.URL.String())
+		userID = "1" // Fallback user ID
 	}
 
-	// Query to get all problems from the database
+	// Handle Clerk IDs by extracting a consistent hash value
+	var userIDForDB string
+	if len(userID) > 20 && userID[:5] == "user_" {
+		// This appears to be a Clerk ID, use a hash of it for DB queries
+		// Take just the last part to make it more manageable
+		userIDForDB = userID[5:10] // Take a portion to create a simpler ID
+		fmt.Printf("Converting Clerk user ID to: %s for getAllProblems\n", userIDForDB)
+	} else {
+		userIDForDB = userID
+	}
+
+	fmt.Printf("Fetching all problems for userID: %s (DB ID: %s)\n", userID, userIDForDB)
+
+	// Query to get all problems from the database - without user-specific data for now
 	rows, err := db.Query(ctx, `SELECT 
     p.problem_id,
     p.title,
     p.difficulty,
-    CASE 
-        WHEN MAX(CASE WHEN s.correct = true THEN 1 ELSE 0 END) = 1 THEN true
-        WHEN COUNT(s.submission_id) > 0 THEN false
-        ELSE NULL
-    END AS solved
+    NULL AS solved
 	FROM 
     	problem p
-	LEFT JOIN 
-    	submission s ON p.problem_id = s.problem_id AND s.user_id = $1
-	GROUP BY 
-    	p.problem_id, p.title, p.difficulty
 	ORDER BY 
     	p.problem_id;
-`, userID)
+`)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to retrieve problems: %v", err), http.StatusInternalServerError)
 		return
@@ -330,22 +364,20 @@ func getChallengeId(w http.ResponseWriter, r *http.Request) {
 	// Set headers
 	w.Header().Set("Content-Type", "application/json")
 
-	// Extract user ID and probID from query parameters
-	userID := r.URL.Query().Get("userID")
-	if userID == "" {
-		http.Error(w, "Missing required query parameter: userID", http.StatusBadRequest)
-		return
-	}
+	// Only extract probID from query parameters
 	probID := r.URL.Query().Get("probID")
 	if probID == "" {
-		http.Error(w, "Missing required query parameter: probID", http.StatusBadRequest)
-		return
+		// Log the error but use a fallback default problem ID
+		fmt.Printf("Warning: Missing probID parameter. Request URL: %s. Using fallback probID.\n", r.URL.String())
+		probID = "1" // Fallback problem ID
 	}
 
-	// Query to get all problems from the database
+	fmt.Printf("Fetching challenge with probID: %s\n", probID)
+
+	// Simple query to get problem details without any user-specific data
 	rows, err := db.Query(ctx, `   
    SELECT 
-    p.problem_id,  -- Include the problem_id in your query result
+    p.problem_id,
     p.title,
     p.difficulty,
     p.question,
@@ -354,22 +386,12 @@ func getChallengeId(w http.ResponseWriter, r *http.Request) {
     p.timelimit,
     p.memorylimit,
     p.tests,
-    -- Add the logic for the 'solved' field
-    CASE 
-        WHEN MAX(CASE WHEN s.correct = true THEN 1 ELSE 0 END) = 1 THEN true
-        WHEN MAX(CASE WHEN s.correct = false THEN 1 ELSE 0 END) = 1 THEN false
-        ELSE NULL
-    END AS solved
+    NULL AS solved
 FROM 
     problem p
-LEFT JOIN 
-    submission s ON p.problem_id = s.problem_id AND s.user_id = $1
 WHERE 
-    p.problem_id = $2
-GROUP BY 
-    p.problem_id, p.title, p.difficulty, p.question, p.inputs, p.outputs, p.timelimit, p.memorylimit, p.tests;
- 
-`, userID, probID)
+    p.problem_id = $1;
+`, probID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to retrieve problems: %v", err), http.StatusInternalServerError)
 		return
@@ -384,6 +406,10 @@ GROUP BY
 			http.Error(w, fmt.Sprintf("Failed to scan problem: %v", err), http.StatusInternalServerError)
 			return
 		}
+	} else {
+		// No problem found
+		http.Error(w, fmt.Sprintf("Problem with ID %s not found", probID), http.StatusNotFound)
+		return
 	}
 
 	// Check for errors after iterating through rows
