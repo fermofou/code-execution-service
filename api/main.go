@@ -29,11 +29,22 @@ type CodeRequest struct {
 	Code     string `json:"code"`
 }
 
+//para leaderboard
 type User struct {
 	Name   string `json:"name"`
 	Points int    `json:"points"`
 	Level  int    `json:"level"`
+
 }
+
+//para pagina navbar tienda
+type UserData struct {
+	Name   string `json:"name"`
+	Points int    `json:"points"`
+	Level  int    `json:"level"`
+	Admin  bool   `json:"admin"`
+}
+
 
 type Job struct {
 	ID        string    `json:"id"`
@@ -271,6 +282,41 @@ func getRewardsHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(rewards)
 }
+
+//conectar clerk con id
+func getDataUser(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	clerkID := vars["clerk_id"]
+	
+	if clerkID == "" {
+		http.Error(w, "clerk_id parameter is required", http.StatusBadRequest)
+		return
+	}
+	fmt.Println("clerk_id:", clerkID)
+
+	rows, err := db.Query(ctx, `SELECT name, points, level, is_admin FROM "User" WHERE clerk_id = $1`, clerkID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to fetch user data: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+
+	var userData UserData
+	err = rows.Scan(&userData.Name, &userData.Points, &userData.Level, &userData.Admin)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse user data: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(userData)
+}
+
 
 func leaderboardHandler(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.Query(ctx, `SELECT name, points, level FROM "User" WHERE is_admin = false ORDER BY points DESC LIMIT 10`)
@@ -515,7 +561,9 @@ func main() {
 	router.HandleFunc("/leaderboard", leaderboardHandler).Methods("GET")
 	router.HandleFunc("/problems", getAllProblems).Methods("GET")
 	router.HandleFunc("/challenge", getChallengeId).Methods("GET")
+	router.HandleFunc("/user/{clerk_id}", getDataUser).Methods("GET")
 	router.HandleFunc("/admin/uploadProblemStatement", uploadProblemStatement).Methods("POST", "OPTIONS")
+
 
 	log.Println("API server running on port 8080")
 	log.Fatal(http.ListenAndServe(":8080", router))
