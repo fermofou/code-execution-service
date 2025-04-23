@@ -13,6 +13,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/jackc/pgx/v4"
+
 )
 
 var ctx = context.Background()
@@ -287,35 +289,46 @@ func getRewardsHandler(w http.ResponseWriter, r *http.Request) {
 func getDataUser(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	clerkID := vars["clerk_id"]
-	
+	name := vars["name"]
+	email := vars["email"]
+
 	if clerkID == "" {
 		http.Error(w, "clerk_id parameter is required", http.StatusBadRequest)
 		return
 	}
-	fmt.Println("clerk_id:", clerkID)
-
-	rows, err := db.Query(ctx, `SELECT name, points, level, is_admin FROM "User" WHERE clerk_id = $1`, clerkID)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to fetch user data: %v", err), http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
-
-	if !rows.Next() {
-		http.Error(w, "User not found", http.StatusNotFound)
-		return
-	}
 
 	var userData UserData
-	err = rows.Scan(&userData.Name, &userData.Points, &userData.Level, &userData.Admin)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to parse user data: %v", err), http.StatusInternalServerError)
+	err := db.QueryRow(context.Background(),
+		`SELECT name, points, level, is_admin FROM "User" WHERE clerk_id = $1`,
+		clerkID,
+	).Scan(&userData.Name, &userData.Points, &userData.Level, &userData.Admin)
+
+	if err == pgx.ErrNoRows {
+		_, insertErr := db.Exec(context.Background(),
+			`INSERT INTO "User" (clerk_id, name, mail, points, level, is_admin)
+			 VALUES ($1, $2, $3, 0, 1, false)`,
+			clerkID, name, email,
+		)
+		if insertErr != nil {
+			http.Error(w, fmt.Sprintf("Insert error: %v", insertErr), http.StatusInternalServerError)
+			return
+		}
+
+		userData = UserData{
+			Name:   name,
+			Points: 0,
+			Level:  1,
+			Admin:  false,
+		}
+	} else if err != nil {
+		http.Error(w, fmt.Sprintf("Query error: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(userData)
 }
+
 
 
 func leaderboardHandler(w http.ResponseWriter, r *http.Request) {
@@ -561,7 +574,7 @@ func main() {
 	router.HandleFunc("/leaderboard", leaderboardHandler).Methods("GET")
 	router.HandleFunc("/problems", getAllProblems).Methods("GET")
 	router.HandleFunc("/challenge", getChallengeId).Methods("GET")
-	router.HandleFunc("/user/{clerk_id}", getDataUser).Methods("GET")
+	router.HandleFunc("/user/{clerk_id}/{name}/{email}", getDataUser).Methods("GET")
 	router.HandleFunc("/admin/uploadProblemStatement", uploadProblemStatement).Methods("POST", "OPTIONS")
 
 
