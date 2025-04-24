@@ -362,33 +362,37 @@ func getAllProblems(w http.ResponseWriter, r *http.Request) {
 	if userID == "" {
 		// Log the error but use a fallback default user ID instead of failing
 		fmt.Printf("Warning: Missing userId parameter in getAllProblems. Request URL: %s. Using fallback userId.\n", r.URL.String())
-		userID = "1" // Fallback user ID
+		userID = "default_fallback_id" // Replace with your actual fallback clerk ID if needed
 	}
+	fmt.Printf("Fetching all problems for userID: %s\n", userID)
 
-	// Handle Clerk IDs by extracting a consistent hash value
-	var userIDForDB string
-	if len(userID) > 20 && userID[:5] == "user_" {
-		// This appears to be a Clerk ID, use a hash of it for DB queries
-		// Take just the last part to make it more manageable
-		userIDForDB = userID[5:10] // Take a portion to create a simpler ID
-		fmt.Printf("Converting Clerk user ID to: %s for getAllProblems\n", userIDForDB)
-	} else {
-		userIDForDB = userID
-	}
+	query := `
+		WITH user_submissions AS (
+			SELECT s.*
+			FROM submission s
+			JOIN "User" u ON u.user_id = s.user_id
+			WHERE u.clerk_id = $1
+		)
+		SELECT 
+			p.problem_id,
+			p.title,
+			p.difficulty,
+			CASE 
+				WHEN MAX(CASE WHEN us.correct = true THEN 1 ELSE 0 END) = 1 THEN true
+				WHEN COUNT(us.submission_id) > 0 THEN false
+				ELSE NULL
+			END AS solved
+		FROM 
+			problem p
+		LEFT JOIN 
+			user_submissions us ON p.problem_id = us.problem_id
+		GROUP BY 
+			p.problem_id, p.title, p.difficulty
+		ORDER BY 
+			p.problem_id;
+	`
 
-	fmt.Printf("Fetching all problems for userID: %s (DB ID: %s)\n", userID, userIDForDB)
-
-	// Query to get all problems from the database - without user-specific data for now
-	rows, err := db.Query(ctx, `SELECT 
-    p.problem_id,
-    p.title,
-    p.difficulty,
-    NULL AS solved
-	FROM 
-    	problem p
-	ORDER BY 
-    	p.problem_id;
-`)
+	rows, err := db.Query(ctx, query, userID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to retrieve problems: %v", err), http.StatusInternalServerError)
 		return
@@ -417,6 +421,8 @@ func getAllProblems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 }
+
+
 
 // parte
 func getChallengeId(w http.ResponseWriter, r *http.Request) {
