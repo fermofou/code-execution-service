@@ -1,20 +1,23 @@
 package main
 
 import (
+	"archive/zip"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
-	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/jackc/pgx/v4"
-
+	"github.com/jackc/pgx/v4/pgxpool"
 )
 
 var ctx = context.Background()
@@ -31,22 +34,20 @@ type CodeRequest struct {
 	Code     string `json:"code"`
 }
 
-//para leaderboard
+// para leaderboard
 type User struct {
 	Name   string `json:"name"`
 	Points int    `json:"points"`
 	Level  int    `json:"level"`
-
 }
 
-//para pagina navbar tienda
+// para pagina navbar tienda
 type UserData struct {
 	Name   string `json:"name"`
 	Points int    `json:"points"`
 	Level  int    `json:"level"`
 	Admin  bool   `json:"admin"`
 }
-
 
 type Job struct {
 	ID        string    `json:"id"`
@@ -112,6 +113,16 @@ type UploadProblemFormat struct {
 	MemoryLimit int    `json:"memorylimit"`
 	Question    string `json:"question"`
 	// Tags        []string `json:"tags"`
+}
+
+type EditProblemFormat struct {
+	ProblemID   int    `json:"problem_id"`
+	Title       string `json:"title"`
+	Difficulty  int    `json:"difficulty"`
+	TimeLimit   int    `json:"timelimit"`
+	SampleTests string `json:"sampletests"`
+	MemoryLimit int    `json:"memorylimit"`
+	Question    string `json:"question"`
 }
 
 func connectToDB() {
@@ -285,7 +296,7 @@ func getRewardsHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(rewards)
 }
 
-//conectar clerk con id
+// conectar clerk con id
 func getDataUser(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	clerkID := vars["clerk_id"]
@@ -328,8 +339,6 @@ func getDataUser(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(userData)
 }
-
-
 
 func leaderboardHandler(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.Query(ctx, `SELECT name, points, level FROM "User" WHERE is_admin = false ORDER BY points DESC LIMIT 10`)
@@ -421,8 +430,6 @@ func getAllProblems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 }
-
-
 
 // parte
 func getChallengeId(w http.ResponseWriter, r *http.Request) {
@@ -536,6 +543,152 @@ func uploadProblemStatement(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func editProblemStatement(w http.ResponseWriter, r *http.Request) {
+	log.Println("Starting editProblemStatement handler")
+
+	var problem EditProblemFormat
+	if err := json.NewDecoder(r.Body).Decode(&problem); err != nil {
+		log.Printf("Failed to decode request payload: %v", err)
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+	log.Printf("Decoded problem: %+v", problem)
+
+	rows, err := db.Query(ctx,
+		`UPDATE problem SET title = $1, difficulty = $2, timelimit = $3, memorylimit = $4, question = $5, inputs = $6, outputs = $7, tests = $8 WHERE problem_id = $9 RETURNING problem_id`,
+		problem.Title, problem.Difficulty, problem.TimeLimit, problem.MemoryLimit, problem.Question, []string{}, []string{}, problem.SampleTests, problem.ProblemID)
+	if err != nil {
+		log.Printf("Failed to update problem in database: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to update problem: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+	log.Println("Database query executed successfully")
+
+	var problemID int
+	if rows.Next() {
+		if err := rows.Scan(&problemID); err != nil {
+			log.Printf("Failed to scan problem ID: %v", err)
+			http.Error(w, fmt.Sprintf("Failed to scan problem ID: %v", err), http.StatusInternalServerError)
+			return
+		}
+		log.Printf("Updated problem ID: %d", problemID)
+	}
+
+	if err = rows.Err(); err != nil {
+		log.Printf("Error iterating through rows: %v", err)
+		http.Error(w, fmt.Sprintf("Error iterating through problems: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	response := struct {
+		Status    string `json:"status"`
+		ProblemID int    `json:"problem_id"`
+	}{
+		Status:    "success",
+		ProblemID: problemID,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+		return
+	}
+	log.Println("Response successfully sent")
+}
+
+func uploadTestCases(w http.ResponseWriter, r *http.Request) {
+	// vars := mux.Vars(r)
+	// problemID := vars["problemId"]
+	// imprimir la request completa
+	fmt.Printf("Request: %v\n", r)
+
+	err := r.ParseMultipartForm(32 << 20) // 32MB max in memory
+	file, handler, err := r.FormFile("file")
+	if err != nil {
+		fmt.Println("Error retrieving the file:", err)
+		return
+	}
+
+	defer file.Close()
+
+	fmt.Printf("Uploaded File: %+v\n", handler.Filename)
+	fmt.Printf("File Size: %+v\n", handler.Size)
+	fmt.Printf("MIME Header: %+v\n", handler.Header)
+
+	tempFile, err := ioutil.TempFile("temp-images", "upload-*.zip")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	defer tempFile.Close()
+
+	fileBytes, err := ioutil.ReadAll(file)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	tempFile.Write(fileBytes)
+
+	fmt.Fprintf(w, "Successfully Uploaded File\n")
+
+}
+
+func unzip(src string, dest string) error {
+	r, err := zip.OpenReader(src)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+
+	// Crear carpeta destino si no existe
+	if err := os.MkdirAll(dest, 0755); err != nil {
+		return err
+	}
+
+	for _, f := range r.File {
+		fpath := filepath.Join(dest, f.Name)
+
+		// Validar que no intente romper la ruta (security)
+		if !filepath.HasPrefix(fpath, filepath.Clean(dest)+string(os.PathSeparator)) {
+			return fmt.Errorf("archivo ilegal: %s", fpath)
+		}
+
+		if f.FileInfo().IsDir() {
+			os.MkdirAll(fpath, f.Mode())
+			continue
+		}
+
+		// Crear carpeta padre si es necesario
+		if err = os.MkdirAll(filepath.Dir(fpath), 0755); err != nil {
+			return err
+		}
+
+		outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+		if err != nil {
+			return err
+		}
+
+		rc, err := f.Open()
+		if err != nil {
+			return err
+		}
+
+		_, err = io.Copy(outFile, rc)
+
+		outFile.Close()
+		rc.Close()
+
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // CORS middleware to allow all origins
 func handleCORS(w http.ResponseWriter, r *http.Request) {
 	// Allow all origins
@@ -582,8 +735,9 @@ func main() {
 	router.HandleFunc("/challenge", getChallengeId).Methods("GET")
 	router.HandleFunc("/user/{clerk_id}/{name}/{email}", getDataUser).Methods("GET")
 	router.HandleFunc("/admin/uploadProblemStatement", uploadProblemStatement).Methods("POST", "OPTIONS")
-
-
+	router.HandleFunc("/admin/editProblemStatement", editProblemStatement).Methods("POST", "OPTIONS")
+	// router.HandleFuc("/admin/deleteProblem", deleteProblem).Methods("POST", "OPTIONS")
+	router.HandleFunc("/admin/uploadTestCases/{problemId}", uploadTestCases).Methods("POST", "OPTIONS")
 	log.Println("API server running on port 8080")
 	log.Fatal(http.ListenAndServe(":8080", router))
 }
