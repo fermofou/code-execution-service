@@ -2,15 +2,16 @@ package main
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -123,6 +124,11 @@ type EditProblemFormat struct {
 	SampleTests string `json:"sampletests"`
 	MemoryLimit int    `json:"memorylimit"`
 	Question    string `json:"question"`
+}
+
+type TestCaseFiles struct {
+	In  string `json:"in"`
+	Out string `json:"out"`
 }
 
 func connectToDB() {
@@ -614,93 +620,132 @@ func deleteProblem(w http.ResponseWriter, r *http.Request) {
 }
 
 func uploadTestCases(w http.ResponseWriter, r *http.Request) {
-	// vars := mux.Vars(r)
-	// problemID := vars["problemId"]
-	// imprimir la request completa
-	fmt.Printf("Request: %v\n", r)
+	w.Header().Set("Content-Type", "application/json")
+
+	respondWithError := func(status int, message string) {
+		w.WriteHeader(status)
+		json.NewEncoder(w).Encode(map[string]string{"error": message})
+	}
+
+	problemID := r.URL.Query().Get("problemId")
+	if problemID == "" {
+		respondWithError(http.StatusBadRequest, "Missing problemId")
+		return
+	}
+
+	err := r.ParseMultipartForm(10 << 20) // 10 MB
+	if err != nil {
+		fmt.Println("Error parsing form:", err)
+		respondWithError(http.StatusBadRequest, "No se pudo parsear el formulario")
+		return
+	}
 
 	file, handler, err := r.FormFile("file")
 	if err != nil {
 		fmt.Println("Error retrieving the file:", err)
+		respondWithError(http.StatusBadRequest, "Error al obtener el archivo")
 		return
 	}
-
 	defer file.Close()
 
-	fmt.Printf("Uploaded File: %+v\n", handler.Filename)
-	fmt.Printf("File Size: %+v\n", handler.Size)
-	fmt.Printf("MIME Header: %+v\n", handler.Header)
+	fmt.Println("Uploaded File:", handler.Filename)
 
-	tempFile, err := ioutil.TempFile("temp-images", "upload-*.zip")
+	var buf bytes.Buffer
+	_, err = io.Copy(&buf, file)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Println("Error copying file to buffer:", err)
+		respondWithError(http.StatusInternalServerError, "Error leyendo el archivo")
 		return
 	}
 
-	defer tempFile.Close()
-
-	fileBytes, err := ioutil.ReadAll(file)
+	reader, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
 	if err != nil {
-		fmt.Println(err)
+		fmt.Println("Error opening zip:", err)
+		respondWithError(http.StatusInternalServerError, "Error abriendo el archivo zip")
 		return
 	}
+	testCases := make(map[string]*TestCaseFiles)
+	validNameRegex := regexp.MustCompile(`^\d+\.(in|out)$`)
+	for _, zipFile := range reader.File {
+		_, fileName := extractFileName(zipFile.Name)
 
-	tempFile.Write(fileBytes)
-
-	fmt.Fprintf(w, "Successfully Uploaded File\n")
-
-}
-
-func unzip(src string, dest string) error {
-	r, err := zip.OpenReader(src)
-	if err != nil {
-		return err
-	}
-	defer r.Close()
-
-	// Crear carpeta destino si no existe
-	if err := os.MkdirAll(dest, 0755); err != nil {
-		return err
-	}
-
-	for _, f := range r.File {
-		fpath := filepath.Join(dest, f.Name)
-
-		// Validar que no intente romper la ruta (security)
-		if !filepath.HasPrefix(fpath, filepath.Clean(dest)+string(os.PathSeparator)) {
-			return fmt.Errorf("archivo ilegal: %s", fpath)
-		}
-
-		if f.FileInfo().IsDir() {
-			os.MkdirAll(fpath, f.Mode())
+		// Solo procesar archivos que matcheen el patrón
+		if !validNameRegex.MatchString(fileName) {
 			continue
 		}
 
-		// Crear carpeta padre si es necesario
-		if err = os.MkdirAll(filepath.Dir(fpath), 0755); err != nil {
-			return err
+		parts := strings.Split(fileName, ".")
+		if len(parts) != 2 {
+			continue
+		}
+		number := parts[0]
+		ext := parts[1]
+
+		zippedFile, err := zipFile.Open()
+		if err != nil {
+			fmt.Println("Error opening file inside zip:", err)
+			continue
 		}
 
-		outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+		content, err := io.ReadAll(zippedFile)
+		zippedFile.Close()
 		if err != nil {
-			return err
+			fmt.Println("Error reading file inside zip:", err)
+			continue
 		}
 
-		rc, err := f.Open()
-		if err != nil {
-			return err
+		// Inicializar si no existe
+		if _, ok := testCases[number]; !ok {
+			testCases[number] = &TestCaseFiles{}
 		}
 
-		_, err = io.Copy(outFile, rc)
-
-		outFile.Close()
-		rc.Close()
-
-		if err != nil {
-			return err
+		// Guardar el contenido según sea .in o .out
+		if ext == "in" {
+			testCases[number].In = string(content)
+		} else if ext == "out" {
+			testCases[number].Out = string(content)
 		}
 	}
-	return nil
+
+	for _, files := range testCases {
+		if files.In == "" || files.Out == "" {
+			continue
+		}
+
+		// insertar en la base de datos que tiene este formato
+
+		/*
+			create table if not exists testcases (
+			    testcase_id serial primary key,
+			    problem_id integer not null,
+			    tin text not null,
+			    tout text not null,
+			    constraint fk_problem
+			        foreign key (problem_id)
+			        references problem (problem_id)
+			        on delete cascade
+			);
+		*/
+
+		_, err := db.Exec(ctx, `INSERT INTO testcases (problem_id, tin, tout) VALUES ($1, $2, $3)`, problemID, files.In, files.Out)
+		if err != nil {
+			fmt.Println("Error inserting test case into database:", err)
+			respondWithError(http.StatusInternalServerError, "Error inserting test case into database")
+			return
+		}
+	}
+
+	// Si todo fue exitoso
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"message": "Test cases procesados exitosamente"})
+}
+
+func extractFileName(path string) (string, string) {
+	parts := strings.Split(path, "/")
+	if len(parts) == 0 {
+		return "", ""
+	}
+	return strings.Join(parts[:len(parts)-1], "/"), parts[len(parts)-1]
 }
 
 // CORS middleware to allow all origins
@@ -751,7 +796,7 @@ func main() {
 	router.HandleFunc("/admin/uploadProblemStatement", uploadProblemStatement).Methods("POST", "OPTIONS")
 	router.HandleFunc("/admin/editProblemStatement", editProblemStatement).Methods("POST", "OPTIONS")
 	router.HandleFunc("/admin/deleteProblem", deleteProblem).Methods("DELETE", "OPTIONS")
-	router.HandleFunc("/admin/uploadTestCases/{problemId}", uploadTestCases).Methods("POST", "OPTIONS")
+	router.HandleFunc("/admin/uploadTestcases", uploadTestCases).Methods("POST", "OPTIONS")
 	log.Println("API server running on port 8080")
 	log.Fatal(http.ListenAndServe(":8080", router))
 }
