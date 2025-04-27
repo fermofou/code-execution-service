@@ -373,7 +373,7 @@ func getAllProblems(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("Warning: Missing userId parameter in getAllProblems. Request URL: %s. Using fallback userId.\n", r.URL.String())
 		userID = "default_fallback_id" // Replace with your actual fallback clerk ID if needed
 	}
-	fmt.Printf("Fetching all problems for userID: %s\n", userID)
+	// fmt.Printf("Fetching all problems for userID: %s\n", userID)
 
 	query := `
 		WITH user_submissions AS (
@@ -444,7 +444,7 @@ func getChallengeId(w http.ResponseWriter, r *http.Request) {
 		probID = "1" // Fallback problem ID
 	}
 
-	fmt.Printf("Fetching challenge with probID: %s\n", probID)
+	// fmt.Printf("Fetching challenge with probID: %s\n", probID)
 
 	// Simple query to get problem details without any user-specific data
 	rows, err := db.Query(ctx, `   
@@ -544,39 +544,30 @@ func uploadProblemStatement(w http.ResponseWriter, r *http.Request) {
 }
 
 func editProblemStatement(w http.ResponseWriter, r *http.Request) {
-	log.Println("Starting editProblemStatement handler")
-
 	var problem EditProblemFormat
 	if err := json.NewDecoder(r.Body).Decode(&problem); err != nil {
-		log.Printf("Failed to decode request payload: %v", err)
 		http.Error(w, "Invalid request payload", http.StatusBadRequest)
 		return
 	}
-	log.Printf("Decoded problem: %+v", problem)
 
 	rows, err := db.Query(ctx,
 		`UPDATE problem SET title = $1, difficulty = $2, timelimit = $3, memorylimit = $4, question = $5, inputs = $6, outputs = $7, tests = $8 WHERE problem_id = $9 RETURNING problem_id`,
 		problem.Title, problem.Difficulty, problem.TimeLimit, problem.MemoryLimit, problem.Question, []string{}, []string{}, problem.SampleTests, problem.ProblemID)
 	if err != nil {
-		log.Printf("Failed to update problem in database: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to update problem: %v", err), http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
-	log.Println("Database query executed successfully")
 
 	var problemID int
 	if rows.Next() {
 		if err := rows.Scan(&problemID); err != nil {
-			log.Printf("Failed to scan problem ID: %v", err)
 			http.Error(w, fmt.Sprintf("Failed to scan problem ID: %v", err), http.StatusInternalServerError)
 			return
 		}
-		log.Printf("Updated problem ID: %d", problemID)
 	}
 
 	if err = rows.Err(); err != nil {
-		log.Printf("Error iterating through rows: %v", err)
 		http.Error(w, fmt.Sprintf("Error iterating through problems: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -591,11 +582,35 @@ func editProblemStatement(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Printf("Failed to encode response: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
 		return
 	}
-	log.Println("Response successfully sent")
+}
+
+func deleteProblem(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	problemID := r.URL.Query().Get("problemId")
+
+	if problemID == "" {
+		return
+	}
+
+	_, err := db.Exec(ctx, `DELETE FROM problem WHERE problem_id = $1`, problemID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to delete problem: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	response := struct {
+		Status string `json:"status"`
+	}{
+		Status: "success",
+	}
+
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+		return
+	}
 }
 
 func uploadTestCases(w http.ResponseWriter, r *http.Request) {
@@ -604,7 +619,6 @@ func uploadTestCases(w http.ResponseWriter, r *http.Request) {
 	// imprimir la request completa
 	fmt.Printf("Request: %v\n", r)
 
-	err := r.ParseMultipartForm(32 << 20) // 32MB max in memory
 	file, handler, err := r.FormFile("file")
 	if err != nil {
 		fmt.Println("Error retrieving the file:", err)
@@ -736,7 +750,7 @@ func main() {
 	router.HandleFunc("/user/{clerk_id}/{name}/{email}", getDataUser).Methods("GET")
 	router.HandleFunc("/admin/uploadProblemStatement", uploadProblemStatement).Methods("POST", "OPTIONS")
 	router.HandleFunc("/admin/editProblemStatement", editProblemStatement).Methods("POST", "OPTIONS")
-	// router.HandleFuc("/admin/deleteProblem", deleteProblem).Methods("POST", "OPTIONS")
+	router.HandleFunc("/admin/deleteProblem", deleteProblem).Methods("DELETE", "OPTIONS")
 	router.HandleFunc("/admin/uploadTestCases/{problemId}", uploadTestCases).Methods("POST", "OPTIONS")
 	log.Println("API server running on port 8080")
 	log.Fatal(http.ListenAndServe(":8080", router))
