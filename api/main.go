@@ -798,5 +798,5 @@ func main() {
 	router.HandleFunc("/admin/deleteProblem", deleteProblem).Methods("DELETE", "OPTIONS")
 	router.HandleFunc("/admin/uploadTestcases", uploadTestCases).Methods("POST", "OPTIONS")
 	log.Println("API server running on port 8080")
-	log.Fatal(http.ListenAndServe(":8080", router))
+	log.Fatal(http.ListenAndServe("0.0.0.0:8080", router))
 }
