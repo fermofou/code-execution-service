@@ -131,6 +131,16 @@ type TestCaseFiles struct {
 	Out string `json:"out"`
 }
 
+type Badge struct {
+	BadgeID    int       `json:"badge_id"`
+	Name       string    `json:"name"`
+	Description string   `json:"description"`
+	Requirement string   `json:"requirement"`
+	ImageURL    string   `json:"image_url"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+
 func connectToDB() {
 	var err error
 	databaseURL := os.Getenv("DATABASE_URL")
@@ -826,6 +836,97 @@ func extractFileName(path string) (string, string) {
 	return strings.Join(parts[:len(parts)-1], "/"), parts[len(parts)-1]
 }
 
+func getBadgesHandler(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Query(ctx, `SELECT badge_id, name, description, requirement, image_url, created_at FROM badge`)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to retrieve badges: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var badges []Badge
+	for rows.Next() {
+		var b Badge
+		if err := rows.Scan(&b.BadgeID, &b.Name, &b.Description, &b.Requirement, &b.ImageURL, &b.CreatedAt); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to scan badge: %v", err), http.StatusInternalServerError)
+			return
+		}
+		badges = append(badges, b)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(badges)
+}
+
+func createBadgeHandler(w http.ResponseWriter, r *http.Request) {
+	var badge Badge
+	if err := json.NewDecoder(r.Body).Decode(&badge); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	var badgeID int
+	err := db.QueryRow(ctx, `
+		INSERT INTO badge (name, description, requirement, image_url, created_at)
+		VALUES ($1, $2, $3, $4, NOW())
+		RETURNING badge_id`,
+		badge.Name, badge.Description, badge.Requirement, badge.ImageURL,
+	).Scan(&badgeID)
+
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to insert badge: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":   "created",
+		"badge_id": badgeID,
+	})
+}
+
+
+func updateBadgeHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id := vars["id"]
+
+	var badge Badge
+	if err := json.NewDecoder(r.Body).Decode(&badge); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	_, err := db.Exec(ctx, `
+		UPDATE badge
+		SET name = $1, description = $2, requirement = $3, image_url = $4
+		WHERE badge_id = $5`,
+		badge.Name, badge.Description, badge.Requirement, badge.ImageURL, id,
+	)
+
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to update badge: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "updated"})
+}
+
+func deleteBadgeHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id := vars["id"]
+
+	_, err := db.Exec(ctx, `DELETE FROM badge WHERE badge_id = $1`, id)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to delete badge: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+}
+
+
 // CORS middleware to allow all origins
 func handleCORS(w http.ResponseWriter, r *http.Request) {
 	// Allow all origins
@@ -875,6 +976,11 @@ func main() {
 	router.HandleFunc("/admin/editProblemStatement", editProblemStatement).Methods("POST", "OPTIONS")
 	router.HandleFunc("/admin/deleteProblem", deleteProblem).Methods("DELETE", "OPTIONS")
 	router.HandleFunc("/admin/uploadTestcases", uploadTestCases).Methods("POST", "OPTIONS")
+	router.HandleFunc("/badges", getBadgesHandler).Methods("GET")
+	router.HandleFunc("/badges", createBadgeHandler).Methods("POST")
+	router.HandleFunc("/badges/{id}", updateBadgeHandler).Methods("PUT")
+	router.HandleFunc("/badges/{id}", deleteBadgeHandler).Methods("DELETE")
+
 	log.Println("API server running on port 8080")
 	log.Fatal(http.ListenAndServe("0.0.0.0:8080", router))
 }
