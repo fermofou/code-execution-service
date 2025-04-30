@@ -316,13 +316,13 @@ func getDataUser(w http.ResponseWriter, r *http.Request) {
 
 	var userData UserData
 	err := db.QueryRow(context.Background(),
-		`SELECT name, points, level, is_admin FROM "User" WHERE clerk_id = $1`,
+		`SELECT name, points, level, is_admin FROM "User" WHERE user_id = $1`,
 		clerkID,
 	).Scan(&userData.Name, &userData.Points, &userData.Level, &userData.Admin)
 
 	if err == pgx.ErrNoRows {
 		_, insertErr := db.Exec(context.Background(),
-			`INSERT INTO "User" (clerk_id, name, mail, points, level, is_admin)
+			`INSERT INTO "User" (user_id, name, mail, points, level, is_admin)
 			 VALUES ($1, $2, $3, 0, 1, false)`,
 			clerkID, name, email,
 		)
@@ -385,8 +385,8 @@ func getAllProblems(w http.ResponseWriter, r *http.Request) {
 		WITH user_submissions AS (
 			SELECT s.*
 			FROM submission s
-			JOIN "User" u ON u.user_id = s.user_id
-			WHERE u.clerk_id = $1
+			
+			WHERE s.user_id = $1
 		)
 		SELECT 
 			p.problem_id,
@@ -441,7 +441,7 @@ func getAllProblems(w http.ResponseWriter, r *http.Request) {
 func getChallengeId(w http.ResponseWriter, r *http.Request) {
 	// Set headers
 	w.Header().Set("Content-Type", "application/json")
-
+	fmt.Printf("algo")
 	// Only extract probID from query parameters
 	probID := r.URL.Query().Get("probID")
 	if probID == "" {
