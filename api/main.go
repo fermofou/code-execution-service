@@ -75,8 +75,8 @@ type Reward struct {
 }
 
 type Claim struct {
-	UserID   string `json:"user_id"`
-	RewardID int    `json:"reward_id"`
+    UserID   string `json:"userID"`   // Exact match for your JSON
+    RewardID int    `json:"rewardID"` // Exact match for your JSON
 }
 
 type ClaimResponse struct {
@@ -244,41 +244,119 @@ func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func claimHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+    if r.Method != http.MethodPost {
+        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
 
-	var claim Claim
-	if err := json.NewDecoder(r.Body).Decode(&claim); err != nil {
-		http.Error(w, "Invalid request payload", http.StatusBadRequest)
-		return
-	}
+    // Read the full request body for logging
+    bodyBytes, err := io.ReadAll(r.Body)
+    if err != nil {
+        http.Error(w, "Failed to read request body", http.StatusBadRequest)
+        return
+    }
+    r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+    
+    log.Printf("Raw request body: %s", string(bodyBytes))
 
-	// Handle Clerk IDs by extracting a consistent hash value
-	var userIDForDB string
-	if len(claim.UserID) > 20 && claim.UserID[:5] == "user_" {
-		// This appears to be a Clerk ID, use a hash of it for DB queries
-		userIDForDB = claim.UserID[5:10] // Take a portion to create a simpler ID
-		fmt.Printf("Converting Clerk user ID to: %s for claim\n", userIDForDB)
-	} else {
-		userIDForDB = claim.UserID
-	}
+    var claim Claim
+    if err := json.NewDecoder(r.Body).Decode(&claim); err != nil {
+        http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+        return
+    }
 
-	// Use the simplified user ID for database operations
-	_, err := db.Exec(ctx, "INSERT INTO Claims (user_id, reward_id) VALUES ($1, $2)", userIDForDB, claim.RewardID)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to insert claim: %v", err), http.StatusInternalServerError)
-		return
-	}
+    log.Printf("Processing claim for userID: %s, rewardID: %d", claim.UserID, claim.RewardID)
 
-	// Respond with success
-	response := ClaimResponse{
-		Success: true,
-		Message: "Claim successfully created",
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+    // Start a transaction to ensure all operations are consistent
+    tx, err := db.Begin(ctx)
+    if err != nil {
+        http.Error(w, fmt.Sprintf("Failed to start transaction: %v", err), http.StatusInternalServerError)
+        return
+    }
+    defer tx.Rollback(ctx) // Will be a no-op if transaction is committed
+
+    // 1. Verify reward exists
+    var rewardExists bool
+    var rewardCost int
+    var inventoryCount int
+    err = tx.QueryRow(ctx, 
+        "SELECT EXISTS(SELECT 1 FROM reward WHERE reward_id = $1), " +
+        "(SELECT cost FROM reward WHERE reward_id = $1), " +
+        "(SELECT inventory_count FROM reward WHERE reward_id = $1)",
+        claim.RewardID).Scan(&rewardExists, &rewardCost, &inventoryCount)
+    
+    if err != nil {
+        http.Error(w, fmt.Sprintf("Database error checking reward: %v", err), http.StatusInternalServerError)
+        return
+    }
+
+    if !rewardExists {
+        http.Error(w, fmt.Sprintf("Reward with ID %d does not exist", claim.RewardID), http.StatusBadRequest)
+        return
+    }
+
+    log.Printf("Reward #%d exists with cost: %d and inventory: %d", claim.RewardID, rewardCost, inventoryCount)
+
+    // 2. Verify user exists and has enough points
+    var userExists bool
+    var userPoints int
+    err = tx.QueryRow(ctx, 
+        "SELECT EXISTS(SELECT 1 FROM \"User\" WHERE user_id = $1), " +
+        "(SELECT points FROM \"User\" WHERE user_id = $1)",
+        claim.UserID).Scan(&userExists, &userPoints)
+    
+    if err != nil {
+        http.Error(w, fmt.Sprintf("Database error checking user: %v", err), http.StatusInternalServerError)
+        return
+    }
+
+    if !userExists {
+        http.Error(w, fmt.Sprintf("User with ID %s does not exist", claim.UserID), http.StatusBadRequest)
+        return
+    }
+
+    log.Printf("User %s exists with %d points", claim.UserID, userPoints)
+
+    // 3. Check if user has enough points
+    if userPoints < rewardCost {
+        http.Error(w, "Not enough points to claim this reward", http.StatusBadRequest)
+        return
+    }
+
+    // 4. Check if reward has inventory
+    if inventoryCount <= 0 {
+        http.Error(w, "This reward is out of stock", http.StatusBadRequest)
+        return
+    }
+
+    // 6. Now insert the claim record
+    _, err = tx.Exec(ctx, 
+        "INSERT INTO claims (user_id, reward_id) VALUES ($1, $2)", 
+        claim.UserID, claim.RewardID)
+    if err != nil {
+        log.Printf("ERROR inserting claim: %v", err)
+        if strings.Contains(err.Error(), "violates foreign key constraint") {
+            http.Error(w, fmt.Sprintf("Foreign key violation. Details: %v", err), http.StatusBadRequest)
+        } else {
+            http.Error(w, fmt.Sprintf("Failed to insert claim: %v", err), http.StatusInternalServerError)
+        }
+        return
+    }
+
+    // Commit the transaction
+    if err := tx.Commit(ctx); err != nil {
+        http.Error(w, fmt.Sprintf("Failed to commit transaction: %v", err), http.StatusInternalServerError)
+        return
+    }
+
+    // Respond with success
+    response := ClaimResponse{
+        Success: true,
+        Message: "Reward claimed successfully",
+    }
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(http.StatusCreated)
+    json.NewEncoder(w).Encode(response)
 }
 
 func getRewardsHandler(w http.ResponseWriter, r *http.Request) {
