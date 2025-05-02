@@ -529,7 +529,6 @@ func getAllProblems(w http.ResponseWriter, r *http.Request) {
 func getChallengeId(w http.ResponseWriter, r *http.Request) {
 	// Set headers
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Printf("algo")
 	// Only extract probID from query parameters
 	probID := r.URL.Query().Get("probID")
 	if probID == "" {
