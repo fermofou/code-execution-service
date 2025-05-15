@@ -1,3 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>API Docs</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/swagger-ui-dist/swagger-ui.css"
+    />
+  </head>
+  <body>
+    <div id="swagger-ui"></div>
+    <script src="https://unpkg.com/swagger-ui-dist/swagger-ui-bundle.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+
+    <script>
+      // Embedding YAML as a string
+      const yamlData = `
 openapi: 3.0.0
 info:
   title: API CodeCourses
@@ -10,7 +28,7 @@ paths:
     get:
       summary: Obtener todos los problemas
       responses:
-        '200':
+        "200":
           description: Lista de problemas
     post:
       summary: Crear un nuevo problema
@@ -19,9 +37,9 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Problem'
+              $ref: "#/components/schemas/Problem"
       responses:
-        '201':
+        "201":
           description: Problema creado
   /problems/{id}:
     get:
@@ -33,7 +51,7 @@ paths:
           schema:
             type: integer
       responses:
-        '200':
+        "200":
           description: Detalles del problema
     put:
       summary: Editar un problema existente
@@ -48,9 +66,9 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Problem'
+              $ref: "#/components/schemas/Problem"
       responses:
-        '200':
+        "200":
           description: Problema actualizado
     delete:
       summary: Eliminar un problema
@@ -61,7 +79,7 @@ paths:
           schema:
             type: integer
       responses:
-        '204':
+        "204":
           description: Eliminado correctamente
   /submissions:
     post:
@@ -71,9 +89,9 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CodeRequest'
+              $ref: "#/components/schemas/CodeRequest"
       responses:
-        '200':
+        "200":
           description: Resultado del código
   /submissions/{id}:
     get:
@@ -85,7 +103,7 @@ paths:
           schema:
             type: string
       responses:
-        '200':
+        "200":
           description: Resultado del envío
   /users/{id}:
     get:
@@ -97,19 +115,19 @@ paths:
           schema:
             type: string
       responses:
-        '200':
+        "200":
           description: Perfil del usuario
   /leaderboard:
     get:
       summary: Obtener ranking de usuarios
       responses:
-        '200':
+        "200":
           description: Ranking de usuarios
   /rewards:
     get:
       summary: Obtener recompensas disponibles
       responses:
-        '200':
+        "200":
           description: Lista de recompensas
   /rewards/claim:
     post:
@@ -119,15 +137,15 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Claim'
+              $ref: "#/components/schemas/Claim"
       responses:
-        '200':
+        "200":
           description: Recompensa reclamada
   /badges:
     get:
       summary: Obtener lista de insignias
       responses:
-        '200':
+        "200":
           description: Lista de insignias
 components:
   schemas:
@@ -172,3 +190,16 @@ components:
           type: string
         rewardID:
           type: integer
+`;
+
+      // Parse the YAML string into a JavaScript object
+      const apiSpec = jsyaml.load(yamlData);
+
+      // Initialize Swagger UI with the YAML data
+      SwaggerUIBundle({
+        spec: apiSpec,
+        dom_id: "#swagger-ui",
+      });
+    </script>
+  </body>
+</html>

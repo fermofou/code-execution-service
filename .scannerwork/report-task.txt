@@ -1,0 +1,6 @@
+projectKey=back-cc
+serverUrl=http://localhost:9000
+serverVersion=25.2.0.102705
+dashboardUrl=http://localhost:9000/dashboard?id=back-cc
+ceTaskId=549258ed-c3fb-4062-be34-cca717c5d069
+ceTaskUrl=http://localhost:9000/api/ce/task?id=549258ed-c3fb-4062-be34-cca717c5d069

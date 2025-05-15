@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>API Docs</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/swagger-ui-dist/swagger-ui.css"
+    />
+  </head>
+  <body>
+    <div id="swagger-ui"></div>
+    <script src="https://unpkg.com/swagger-ui-dist/swagger-ui-bundle.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+
+    <script>
+      // Embedding YAML as a string
+      const yamlData = `
+openapi: 3.0.0
+info:
+  title: API CodeCourses
+  version: 1.0.0
+  description: API RESTful para gestión de problemas, usuarios, recompensas y envíos de código.
+servers:
+  - url: http://localhost:8080/api
+paths:
+  /problems:
+    get:
+      summary: Obtener todos los problemas
+      responses:
+        "200":
+          description: Lista de problemas
+    post:
+      summary: Crear un nuevo problema
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Problem"
+      responses:
+        "201":
+          description: Problema creado
+  /problems/{id}:
+    get:
+      summary: Obtener un problema por ID
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Detalles del problema
+    put:
+      summary: Editar un problema existente
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Problem"
+      responses:
+        "200":
+          description: Problema actualizado
+    delete:
+      summary: Eliminar un problema
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Eliminado correctamente
+  /submissions:
+    post:
+      summary: Enviar código para evaluación
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CodeRequest"
+      responses:
+        "200":
+          description: Resultado del código
+  /submissions/{id}:
+    get:
+      summary: Obtener el resultado de un envío
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Resultado del envío
+  /users/{id}:
+    get:
+      summary: Obtener perfil de usuario
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Perfil del usuario
+  /leaderboard:
+    get:
+      summary: Obtener ranking de usuarios
+      responses:
+        "200":
+          description: Ranking de usuarios
+  /rewards:
+    get:
+      summary: Obtener recompensas disponibles
+      responses:
+        "200":
+          description: Lista de recompensas
+  /rewards/claim:
+    post:
+      summary: Reclamar una recompensa
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Claim"
+      responses:
+        "200":
+          description: Recompensa reclamada
+  /badges:
+    get:
+      summary: Obtener lista de insignias
+      responses:
+        "200":
+          description: Lista de insignias
+components:
+  schemas:
+    Problem:
+      type: object
+      properties:
+        problem_id:
+          type: integer
+        title:
+          type: string
+        difficulty:
+          type: integer
+        solved:
+          type: boolean
+        timelimit:
+          type: integer
+        tests:
+          type: string
+        memorylimit:
+          type: integer
+        question:
+          type: string
+        inputs:
+          type: array
+          items:
+            type: string
+        outputs:
+          type: array
+          items:
+            type: string
+    CodeRequest:
+      type: object
+      properties:
+        language:
+          type: string
+        code:
+          type: string
+    Claim:
+      type: object
+      properties:
+        userID:
+          type: string
+        rewardID:
+          type: integer
+`;
+
+      // Parse the YAML string into a JavaScript object
+      const apiSpec = jsyaml.load(yamlData);
+
+      // Initialize Swagger UI with the YAML data
+      SwaggerUIBundle({
+        spec: apiSpec,
+        dom_id: "#swagger-ui",
+      });
+    </script>
+  </body>
+</html>

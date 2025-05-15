@@ -1,6 +1,8 @@
 module leetcode-clone
 
-go 1.19
+go 1.21
+
+toolchain go1.24.1
 
 require (
 	github.com/go-redis/redis/v8 v8.11.5
@@ -22,6 +24,7 @@ require (
 	github.com/jackc/pgx/v4 v4.18.3 // indirect
 	github.com/jackc/puddle v1.3.0 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
+	github.com/joho/godotenv v1.5.1 // indirect
 	golang.org/x/crypto v0.31.0 // indirect
 	golang.org/x/sync v0.10.0 // indirect
 	golang.org/x/text v0.21.0 // indirect

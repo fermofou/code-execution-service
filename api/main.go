@@ -19,6 +19,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/joho/godotenv"
 )
 
 var ctx = context.Background()
@@ -142,10 +143,14 @@ type Badge struct {
 
 
 func connectToDB() {
-	var err error
+	//var err error
+	err := godotenv.Load() // Load .env file
+    if err != nil {
+        log.Fatal("Error loading .env file")
+    }
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
-		databaseURL = "postgres://avnadmin:AVNS_lOhjYg-hwx2CdWSGKk_@postgres-moran-tec-c540.j.aivencloud.com:13026/defaultdb?sslmode=require"
+		databaseURL = ""
 	}
 
 	db, err = pgxpool.Connect(ctx, databaseURL)
@@ -942,6 +947,8 @@ func handleCORS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+
+
 func main() {
 	// Set default Redis address if not provided
 	if os.Getenv("REDIS_ADDR") == "" {
@@ -979,7 +986,7 @@ func main() {
 	router.HandleFunc("/badges", createBadgeHandler).Methods("POST")
 	router.HandleFunc("/badges/{id}", updateBadgeHandler).Methods("PUT")
 	router.HandleFunc("/badges/{id}", deleteBadgeHandler).Methods("DELETE")
-
+	
 	log.Println("API server running on port 8080")
 	log.Fatal(http.ListenAndServe("0.0.0.0:8080", router))
 }
