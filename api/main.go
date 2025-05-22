@@ -141,6 +141,12 @@ type Badge struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+// User management types
+type UpdateUserRequest struct {
+	Name   string `json:"name"`
+	Level  int    `json:"level"`
+	Points int    `json:"points"`
+}
 
 func connectToDB() {
 	//var err error
@@ -889,7 +895,6 @@ func createBadgeHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-
 func updateBadgeHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id := vars["id"]
@@ -930,6 +935,81 @@ func deleteBadgeHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 }
 
+func getAllUsersHandler(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Query(ctx, `SELECT user_id, name, mail, points, level, is_admin FROM "User" ORDER BY points DESC`)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to fetch users: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var users []struct {
+		ID      string `json:"id"`
+		Name    string `json:"name"`
+		Mail    string `json:"mail"`
+		Points  int    `json:"points"`
+		Level   int    `json:"level"`
+		IsAdmin bool   `json:"is_admin"`
+	}
+
+	for rows.Next() {
+		var u struct {
+			ID      string `json:"id"`
+			Name    string `json:"name"`
+			Mail    string `json:"mail"`
+			Points  int    `json:"points"`
+			Level   int    `json:"level"`
+			IsAdmin bool   `json:"is_admin"`
+		}
+		if err := rows.Scan(&u.ID, &u.Name, &u.Mail, &u.Points, &u.Level, &u.IsAdmin); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to scan user: %v", err), http.StatusInternalServerError)
+			return
+		}
+		users = append(users, u)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(users)
+}
+
+func updateUserHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	userID := vars["user_id"]
+
+	var req UpdateUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	// Validate input
+	if req.Name == "" {
+		http.Error(w, "Name is required", http.StatusBadRequest)
+		return
+	}
+	if req.Level < 1 {
+		http.Error(w, "Level must be at least 1", http.StatusBadRequest)
+		return
+	}
+	if req.Points < 0 {
+		http.Error(w, "Points cannot be negative", http.StatusBadRequest)
+		return
+	}
+
+	_, err := db.Exec(ctx,
+		`UPDATE "User" 
+		 SET name = $1, level = $2, points = $3 
+		 WHERE user_id = $4`,
+		req.Name, req.Level, req.Points, userID)
+
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to update user: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "updated"})
+}
 
 // CORS middleware to allow all origins
 func handleCORS(w http.ResponseWriter, r *http.Request) {
@@ -946,8 +1026,6 @@ func handleCORS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 }
-
-
 
 func main() {
 	// Set default Redis address if not provided
@@ -986,7 +1064,9 @@ func main() {
 	router.HandleFunc("/badges", createBadgeHandler).Methods("POST")
 	router.HandleFunc("/badges/{id}", updateBadgeHandler).Methods("PUT")
 	router.HandleFunc("/badges/{id}", deleteBadgeHandler).Methods("DELETE")
-	
+	router.HandleFunc("/admin/users", getAllUsersHandler).Methods("GET", "OPTIONS")
+	router.HandleFunc("/admin/updateUser/{user_id}", updateUserHandler).Methods("PUT", "OPTIONS")
+
 	log.Println("API server running on port 8080")
 	log.Fatal(http.ListenAndServe("0.0.0.0:8080", router))
 }
