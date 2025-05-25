@@ -75,10 +75,22 @@ type Reward struct {
 	Cost           int    `json:"cost"`
 }
 
+//este es de compras
 type Claim struct {
 	UserID   string `json:"userID"`   // Exact match for your JSON
 	RewardID int    `json:"rewardID"` // Exact match for your JSON
 }
+
+//para admins
+type ClaimAdmins struct {
+    ClaimID  int    `json:"claim_id"`
+    Mail     string `json:"mail"`
+    Date     time.Time `json:"timestamp"`
+    Name     string `json:"name"`
+    RewardID int    `json:"reward_id"`
+}
+
+
 
 type ClaimResponse struct {
 	Success bool   `json:"success"`
@@ -1053,6 +1065,43 @@ func getUserBadgesHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(badges)
 }
 
+//admin ver todas las compras
+func getAllClaimsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	rows, err := db.Query(ctx, `
+		SELECT c.claim_id, u.mail, c.date, r.name, r.reward_id
+		FROM claims c
+		LEFT JOIN reward r ON r.reward_id = c.reward_id
+		LEFT JOIN "User" u ON u.user_id = c.user_id
+		ORDER BY c.date DESC
+	`)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to retrieve claims: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+    var claims []ClaimAdmins
+
+    for rows.Next() {
+        var c ClaimAdmins
+        err := rows.Scan(&c.ClaimID, &c.Mail, &c.Date, &c.Name, &c.RewardID)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to scan claim: %v", err), http.StatusInternalServerError)
+			return
+		}
+		claims = append(claims, c)
+	}
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(claims)
+}
+
+
+
 // CORS middleware to allow all origins
 func handleCORS(w http.ResponseWriter, r *http.Request) {
 	// Allow all origins
@@ -1109,6 +1158,7 @@ func main() {
 	router.HandleFunc("/admin/users", getAllUsersHandler).Methods("GET", "OPTIONS")
 	router.HandleFunc("/admin/updateUser/{user_id}", updateUserHandler).Methods("PUT", "OPTIONS")
 	router.HandleFunc("/admin/user/{id}/badges", getUserBadgesHandler).Methods("GET", "OPTIONS")
+	router.HandleFunc("/admin/claims",getAllClaimsHandler).Methods("GET")
 
 	log.Println("API server running on port 8080")
 	log.Fatal(http.ListenAndServe("0.0.0.0:8080", router))
