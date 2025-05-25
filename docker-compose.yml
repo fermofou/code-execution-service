@@ -19,6 +19,8 @@ services:
       - REDIS_ADDR=redis:6379
     depends_on:
       - redis
+    volumes:
+       - ./api/.env:/app/.env
     restart: always
 
   worker:
