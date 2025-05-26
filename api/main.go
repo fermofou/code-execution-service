@@ -36,12 +36,19 @@ type CodeRequest struct {
 	Code     string `json:"code"`
 }
 
-// para leaderboard
-type User struct {
-	Name   string `json:"name"`
-	Points int    `json:"points"`
-	Level  int    `json:"level"`
-}
+// para leaderboard - ya no la usaba
+//type User struct {
+//	Name   string `json:"name"`
+//	Points int    `json:"points"`
+//	Level  int    `json:"level"`
+//}
+type LeaderboardUser struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Points   int    `json:"points"`
+	Level    int    `json:"level"`
+	ImageURL string `json:"image_url"`
+	}
 
 // para pagina navbar tienda
 type UserData struct {
@@ -475,30 +482,49 @@ func leaderboardHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	var users []struct {
-		ID     string `json:"id"`
-		Name   string `json:"name"`
-		Points int    `json:"points"`
-		Level  int    `json:"level"`
-	}
+	var users []LeaderboardUser
 
 	for rows.Next() {
-		var u struct {
-			ID     string `json:"id"`
-			Name   string `json:"name"`
-			Points int    `json:"points"`
-			Level  int    `json:"level"`
-		}
+		var u LeaderboardUser
 		if err := rows.Scan(&u.ID, &u.Name, &u.Points, &u.Level); err != nil {
 			http.Error(w, "Failed to scan user", http.StatusInternalServerError)
 			return
 		}
+
+		// Fetch image from Clerk
+		clerkUserURL := fmt.Sprintf("https://api.clerk.com/v1/users/%s", u.ID)
+		req, err := http.NewRequest("GET", clerkUserURL, nil)
+		if err != nil {
+			http.Error(w, "Failed to create Clerk request", http.StatusInternalServerError)
+			return
+		}
+		req.Header.Set("Authorization", "Bearer "+os.Getenv("CLERK_SECRET_KEY"))
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			http.Error(w, "Failed to fetch user from Clerk", http.StatusInternalServerError)
+			return
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != 200 {
+			u.ImageURL = "" // fallback
+		} else {
+			var clerkData struct {
+				ImageURL string `json:"image_url"`
+			}
+			body, _ := io.ReadAll(resp.Body)
+			json.Unmarshal(body, &clerkData)
+			u.ImageURL = clerkData.ImageURL
+		}
+
 		users = append(users, u)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(users)
 }
+
 
 func getAllProblems(w http.ResponseWriter, r *http.Request) {
 	// Set headers
