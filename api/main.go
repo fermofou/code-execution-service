@@ -90,7 +90,13 @@ type ClaimAdmins struct {
     RewardID int    `json:"reward_id"`
 }
 
-
+//para mis compras
+type ClaimUser struct {
+	ClaimID  int    `json:"claim_id"`
+	Date     time.Time `json:"timestamp"`
+	Name     string `json:"name"`
+    RewardID int    `json:"reward_id"`
+}
 
 type ClaimResponse struct {
 	Success bool   `json:"success"`
@@ -1100,7 +1106,40 @@ func getAllClaimsHandler(w http.ResponseWriter, r *http.Request) {
     json.NewEncoder(w).Encode(claims)
 }
 
+func getUserClaimsHandler(w http.ResponseWriter, r *http.Request) {
+	userID := r.URL.Query().Get("userId")
+	if userID == "" {
+		http.Error(w, "Missing userId parameter", http.StatusBadRequest)
+		return
+	}
 
+	rows, err := db.Query(ctx, `
+		SELECT c.claim_id, c.date, r.name, r.reward_id
+		FROM claims c
+		LEFT JOIN reward r ON r.reward_id = c.reward_id
+		WHERE c.user_id = $1
+		ORDER BY c.date DESC
+	`, userID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to retrieve user claims: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var claims []ClaimUser
+	for rows.Next() {
+		var c ClaimUser
+		err := rows.Scan(&c.ClaimID, &c.Date, &c.Name, &c.RewardID)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to scan user claim: %v", err), http.StatusInternalServerError)
+			return
+		}
+		claims = append(claims, c)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(claims)
+}
 
 // CORS middleware to allow all origins
 func handleCORS(w http.ResponseWriter, r *http.Request) {
@@ -1159,6 +1198,7 @@ func main() {
 	router.HandleFunc("/admin/updateUser/{user_id}", updateUserHandler).Methods("PUT", "OPTIONS")
 	router.HandleFunc("/admin/user/{id}/badges", getUserBadgesHandler).Methods("GET", "OPTIONS")
 	router.HandleFunc("/admin/claims",getAllClaimsHandler).Methods("GET")
+	router.HandleFunc("/myRewards", getUserClaimsHandler).Methods("GET")
 
 	log.Println("API server running on port 8080")
 	log.Fatal(http.ListenAndServe("0.0.0.0:8080", router))
