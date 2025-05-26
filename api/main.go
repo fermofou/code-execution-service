@@ -75,27 +75,27 @@ type Reward struct {
 	Cost           int    `json:"cost"`
 }
 
-//este es de compras
+// este es de compras
 type Claim struct {
 	UserID   string `json:"userID"`   // Exact match for your JSON
 	RewardID int    `json:"rewardID"` // Exact match for your JSON
 }
 
-//para admins
+// para admins
 type ClaimAdmins struct {
-    ClaimID  int    `json:"claim_id"`
-    Mail     string `json:"mail"`
-    Date     time.Time `json:"timestamp"`
-    Name     string `json:"name"`
-    RewardID int    `json:"reward_id"`
+	ClaimID  int       `json:"claim_id"`
+	Mail     string    `json:"mail"`
+	Date     time.Time `json:"timestamp"`
+	Name     string    `json:"name"`
+	RewardID int       `json:"reward_id"`
 }
 
-//para mis compras
+// para mis compras
 type ClaimUser struct {
-	ClaimID  int    `json:"claim_id"`
+	ClaimID  int       `json:"claim_id"`
 	Date     time.Time `json:"timestamp"`
-	Name     string `json:"name"`
-    RewardID int    `json:"reward_id"`
+	Name     string    `json:"name"`
+	RewardID int       `json:"reward_id"`
 }
 
 type ClaimResponse struct {
@@ -157,6 +157,10 @@ type Badge struct {
 	Requirement string    `json:"requirement"`
 	ImageURL    string    `json:"image_url"`
 	CreatedAt   time.Time `json:"created_at"`
+}
+
+type UpdateBadgeRequest struct {
+	Badges []int `json:"medals"` // List of badge IDs to update
 }
 
 // User management types
@@ -1071,7 +1075,7 @@ func getUserBadgesHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(badges)
 }
 
-//admin ver todas las compras
+// admin ver todas las compras
 func getAllClaimsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
@@ -1091,19 +1095,19 @@ func getAllClaimsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-    var claims []ClaimAdmins
+	var claims []ClaimAdmins
 
-    for rows.Next() {
-        var c ClaimAdmins
-        err := rows.Scan(&c.ClaimID, &c.Mail, &c.Date, &c.Name, &c.RewardID)
+	for rows.Next() {
+		var c ClaimAdmins
+		err := rows.Scan(&c.ClaimID, &c.Mail, &c.Date, &c.Name, &c.RewardID)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Failed to scan claim: %v", err), http.StatusInternalServerError)
 			return
 		}
 		claims = append(claims, c)
 	}
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(claims)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(claims)
 }
 
 func getUserClaimsHandler(w http.ResponseWriter, r *http.Request) {
@@ -1139,6 +1143,40 @@ func getUserClaimsHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(claims)
+}
+
+func updateUserBadgesHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	userID := vars["id"]
+	// get the badge IDs from the request body
+	var badgeIDs []int
+	if err := json.NewDecoder(r.Body).Decode(&badgeIDs); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+	// Validate input
+	if len(badgeIDs) == 0 {
+		http.Error(w, "At least one badge ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// hacer un query para eliminar los badges que ya no estan en la lista poniendo uno por uno
+	_, err := db.Exec(ctx, `DELETE FROM user_badge WHERE user_id = $1 AND badge_id NOT IN (SELECT unnest($2::int[]))`, userID, badgeIDs)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to update user badges: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// insertar las badges que no están en la lista INSERT INTO "user_badge" (user_id, badge_id) VALUES ('user_2xScE26jLQSnkf5GZjSVsmJVP75', 1)
+	for _, badgeID := range badgeIDs {
+		_, err := db.Exec(ctx, `INSERT INTO user_badge (user_id, badge_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, userID, badgeID)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to insert user badge: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "badges updated"})
 }
 
 // CORS middleware to allow all origins
@@ -1196,8 +1234,9 @@ func main() {
 	router.HandleFunc("/badges/{id}", deleteBadgeHandler).Methods("DELETE")
 	router.HandleFunc("/admin/users", getAllUsersHandler).Methods("GET", "OPTIONS")
 	router.HandleFunc("/admin/updateUser/{user_id}", updateUserHandler).Methods("PUT", "OPTIONS")
+	router.HandleFunc("/admin/user/{id}/updateBadges", updateUserBadgesHandler).Methods("POST", "OPTIONS")
 	router.HandleFunc("/admin/user/{id}/badges", getUserBadgesHandler).Methods("GET", "OPTIONS")
-	router.HandleFunc("/admin/claims",getAllClaimsHandler).Methods("GET")
+	router.HandleFunc("/admin/claims", getAllClaimsHandler).Methods("GET")
 	router.HandleFunc("/myRewards", getUserClaimsHandler).Methods("GET")
 
 	log.Println("API server running on port 8080")
