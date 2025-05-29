@@ -37,18 +37,19 @@ type CodeRequest struct {
 }
 
 // para leaderboard - ya no la usaba
-//type User struct {
-//	Name   string `json:"name"`
-//	Points int    `json:"points"`
-//	Level  int    `json:"level"`
-//}
+//
+//	type User struct {
+//		Name   string `json:"name"`
+//		Points int    `json:"points"`
+//		Level  int    `json:"level"`
+//	}
 type LeaderboardUser struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
 	Points   int    `json:"points"`
 	Level    int    `json:"level"`
 	ImageURL string `json:"image_url"`
-	}
+}
 
 // para pagina navbar tienda
 type UserData struct {
@@ -524,7 +525,6 @@ func leaderboardHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(users)
 }
-
 
 func getAllProblems(w http.ResponseWriter, r *http.Request) {
 	// Set headers
@@ -1221,6 +1221,123 @@ func handleCORS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func getAdminStats(w http.ResponseWriter, r *http.Request) {
+	type RewardStat struct {
+		Name  string `json:"reward"`
+		Count int    `json:"timesRedeemed"`
+	}
+
+	type LangStat struct {
+		Language    string `json:"language"`
+		Submissions int    `json:"submissions"`
+	}
+
+	type NewUser struct {
+		Name string `json:"name"`
+		Date string `json:"date"`
+	}
+
+	type BadgeWeek struct {
+		Week   string `json:"week"`
+		Badges int    `json:"badges"`
+	}
+
+	stats := make(map[string]interface{})
+
+	query := `
+		SELECT 
+			(SELECT COUNT(*) FROM "User") AS total_users,
+			(SELECT COUNT(*) FROM badge) AS total_badges,
+			(SELECT AVG(level) FROM "User") AS average_level,
+			(SELECT COUNT(*) FROM problem) AS total_problems,
+			(SELECT COUNT(*) FROM submission WHERE date >= NOW() - INTERVAL '10 minutes') AS active_sessions
+	`
+	var totalUsers, totalBadges, totalProblems, activeSessions int
+	var averageLevel float64
+
+	err := db.QueryRow(ctx, query).Scan(&totalUsers, &totalBadges, &averageLevel, &totalProblems, &activeSessions)
+	if err != nil {
+		http.Error(w, "Error retrieving stats", http.StatusInternalServerError)
+		return
+	}
+
+	stats["totalUsers"] = totalUsers
+	stats["totalBadges"] = totalBadges
+	stats["averageLevel"] = int(averageLevel)
+	stats["activeSessions"] = activeSessions
+	stats["totalProblems"] = totalProblems
+
+	rewardsQuery := `
+		SELECT r.name, COUNT(*) AS count
+		FROM claims c
+		JOIN reward r ON r.reward_id = c.reward_id
+		GROUP BY r.name
+		ORDER BY count DESC
+		LIMIT 5;
+	`
+	var rewards []RewardStat
+	rows, _ := db.Query(ctx, rewardsQuery)
+	for rows.Next() {
+		var r RewardStat
+		rows.Scan(&r.Name, &r.Count)
+		rewards = append(rewards, r)
+	}
+	stats["rewardsRedeemed"] = rewards
+
+	languagesQuery := `
+		SELECT language, COUNT(*) as submissions
+		FROM submission
+		GROUP BY language
+		ORDER BY submissions DESC
+		LIMIT 5;
+	`
+	var langs []LangStat
+	rows, _ = db.Query(ctx, languagesQuery)
+	for rows.Next() {
+		var l LangStat
+		rows.Scan(&l.Language, &l.Submissions)
+		langs = append(langs, l)
+	}
+	stats["popularLanguages"] = langs
+
+	usersQuery := `
+		SELECT name, date_trunc('day', CURRENT_DATE - (CURRENT_DATE - created)::interval) as created
+		FROM "User"
+		WHERE created >= CURRENT_DATE - INTERVAL '7 days'
+		ORDER BY created DESC
+		LIMIT 5;
+	`
+	var newUsers []NewUser
+	rows, _ = db.Query(ctx, usersQuery)
+	for rows.Next() {
+		var u NewUser
+		var created time.Time
+		rows.Scan(&u.Name, &created)
+		u.Date = created.Format("Jan 2")
+		newUsers = append(newUsers, u)
+	}
+	stats["newUsers"] = newUsers
+
+	badgesQuery := `
+		SELECT TO_CHAR(awarded_at, 'YYYY-"W"IW') as week, COUNT(*) 
+		FROM user_badge
+		GROUP BY week
+		ORDER BY week DESC
+		LIMIT 5;
+	`
+	var growth []BadgeWeek
+	rows, _ = db.Query(ctx, badgesQuery)
+	for rows.Next() {
+		var b BadgeWeek
+		rows.Scan(&b.Week, &b.Badges)
+		growth = append(growth, b)
+	}
+	stats["userGrowthData"] = growth
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
+}
+
 func main() {
 	// Set default Redis address if not provided
 	if os.Getenv("REDIS_ADDR") == "" {
@@ -1264,6 +1381,7 @@ func main() {
 	router.HandleFunc("/admin/user/{id}/badges", getUserBadgesHandler).Methods("GET", "OPTIONS")
 	router.HandleFunc("/admin/claims", getAllClaimsHandler).Methods("GET")
 	router.HandleFunc("/myRewards", getUserClaimsHandler).Methods("GET")
+	router.HandleFunc("/api/admin/stats", getAdminStats).Methods("GET")
 
 	log.Println("API server running on port 8080")
 	log.Fatal(http.ListenAndServe("0.0.0.0:8080", router))
