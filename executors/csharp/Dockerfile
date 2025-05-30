@@ -6,12 +6,12 @@ WORKDIR /executor
 RUN apt-get update && apt-get install -y curl
 
 # Copy the executor script
-COPY executor.sh /executor/executor.sh
+COPY executor.sh /executor/execute.sh
 
 # Make it executable
-RUN chmod +x /executor/executor.sh
+RUN chmod +x /executor/execute.sh
 
 # Create shared code mount dir
 RUN mkdir -p /code && chmod 777 /code
 
-CMD ["/executor/executor.sh"]
+CMD ["/executor/execute.sh"]
