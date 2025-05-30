@@ -32,12 +32,10 @@ dotnet new console -o "${TEMP_DIR}/csproj" --force > /dev/null 2>&1
 # Replace default Program.cs with downloaded code
 mv "$CODE_FILE" "${TEMP_DIR}/csproj/Program.cs"
 
-echo "Restoring and building project..."
+echo "Building project..."
 
-# Restore and build
-cd "${TEMP_DIR}/csproj"
-dotnet build -c Release > /dev/null 2> "${TEMP_DIR}/build_stderr"
-
+# Build project (not run!)
+dotnet build "${TEMP_DIR}/csproj" -c Release > /dev/null 2> "${TEMP_DIR}/build_stderr"
 if [ $? -ne 0 ]; then
     echo "STDERR:"
     cat "${TEMP_DIR}/build_stderr"
@@ -45,11 +43,13 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-echo "Running program..."
+echo "Executing compiled program..."
 
-# Execute the program with timeout
-timeout 5s dotnet run -c Release > "${TEMP_DIR}/stdout" 2> "${TEMP_DIR}/stderr"
+# Run the compiled .dll directly (C++-like behavior)
+APP_DLL="${TEMP_DIR}/csproj/bin/Release/net7.0/csproj.dll"
+timeout 5s dotnet "$APP_DLL" > "${TEMP_DIR}/stdout" 2> "${TEMP_DIR}/stderr"
 
+# Check if execution timed out
 if [ $? -eq 124 ]; then
     echo "STDERR:"
     echo "Execution timed out."
@@ -57,6 +57,7 @@ if [ $? -eq 124 ]; then
     exit 1
 fi
 
+# Output results
 echo "STDOUT:"
 cat "${TEMP_DIR}/stdout"
 echo "STDERR:"

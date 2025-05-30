@@ -9,7 +9,7 @@ fi
 
 # Create a temporary directory
 TEMP_DIR=$(mktemp -d)
-CODE_FILE="${TEMP_DIR}/Program.cs"
+CODE_FILE="${TEMP_DIR}/code.cpp"
 
 echo "Fetching code from: $CODE_URL"
 
@@ -24,30 +24,23 @@ if [ $? -ne 0 ] || [ ! -s "$CODE_FILE" ]; then
     exit 1
 fi
 
-echo "Creating new C# project..."
+echo "Compiling file: $CODE_FILE"
 
-# Initialize new .NET console project
-dotnet new console -o "${TEMP_DIR}/csproj" --force > /dev/null 2>&1
+# Compile the code
+g++ -std=c++17 -o "${TEMP_DIR}/program" "$CODE_FILE"
 
-# Replace default Program.cs with downloaded code
-mv "$CODE_FILE" "${TEMP_DIR}/csproj/Program.cs"
-
-echo "Building project..."
-
-# Build project (not run!)
-dotnet build "${TEMP_DIR}/csproj" -c Release > /dev/null 2> "${TEMP_DIR}/build_stderr"
+# Check if compilation was successful
 if [ $? -ne 0 ]; then
     echo "STDERR:"
-    cat "${TEMP_DIR}/build_stderr"
+    echo "Compilation error."
     rm -rf "$TEMP_DIR"
     exit 1
 fi
 
-echo "Executing compiled program..."
+echo "Executing compiled program"
 
-# Run the compiled .dll directly (C++-like behavior)
-APP_DLL="${TEMP_DIR}/csproj/bin/Release/net7.0/csproj.dll"
-timeout 5s dotnet "$APP_DLL" > "${TEMP_DIR}/stdout" 2> "${TEMP_DIR}/stderr"
+# Run the program with timeout
+timeout 5s "${TEMP_DIR}/program" > "${TEMP_DIR}/stdout" 2> "${TEMP_DIR}/stderr"
 
 # Check if execution timed out
 if [ $? -eq 124 ]; then
