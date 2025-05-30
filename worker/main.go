@@ -92,6 +92,9 @@ func executeCode(job Job) JobResult {
 		containerName = "javascript-executor:latest"
 	case "cpp":
 		containerName = "cpp-executor:latest"
+	case "c#":
+		containerName = "csharp-executor:latest"
+
 	default:
 		return JobResult{
 			JobID:     job.ID,

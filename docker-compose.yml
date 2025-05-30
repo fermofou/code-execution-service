@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   redis:
@@ -20,7 +20,7 @@ services:
     depends_on:
       - redis
     volumes:
-       - ./api/.env:/app/.env
+      - ./api/.env:/app/.env
     restart: always
 
   worker:
@@ -41,6 +41,8 @@ services:
       - python-executor
       - javascript-executor
       - cpp-executor
+      - csharp-executor
+
     restart: on-failure:5
     privileged: true
     init: true
@@ -70,6 +72,14 @@ services:
       - shared-code:/code
     restart: "no"
 
+  csharp-executor:
+    build:
+      context: ./executors/csharp
+    image: csharp-executor
+    volumes:
+      - shared-code:/code
+    restart: "no"
+
 volumes:
   redis-data:
-  shared-code: 
+  shared-code:
