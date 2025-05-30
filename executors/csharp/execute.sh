@@ -7,4 +7,7 @@ curl -s "$CODE_URL" -o Program.cs
 csc Program.cs
 
 # Run the output
-timeout 5s ./Program.exe
+echo "[DEBUG] Starting execution..."
+time mono Program.exe
+
+#timeout 5s ./Program.exe
