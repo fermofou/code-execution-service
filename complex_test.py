@@ -192,7 +192,76 @@ int main() {
     print("Result:")
     print(json.dumps(result_response.json(), indent=2))
 
+def test_complex_csharp():
+    print("\nTesting Complex C# Code Execution...")
+    code = """
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+class Program
+{
+    static int Factorial(int n)
+    {
+        if (n <= 1) return 1;
+        return n * Factorial(n - 1);
+    }
+
+    static void Main()
+    {
+        // Calculate factorial of 5
+        int fact5 = Factorial(5);
+        Console.WriteLine($"Factorial of 5 is: {fact5}");
+
+        // Test LINQ with list of numbers
+        List<int> numbers = new List<int> { 1, 2, 3, 4, 5 };
+        var doubled = numbers.Select(n => n * 2).ToList();
+        Console.WriteLine("Doubled numbers: " + string.Join(", ", doubled));
+
+        // Test exception handling
+        try
+        {
+            int x = 0;
+            int y = 1 / x;
+        }
+        catch (DivideByZeroException ex)
+        {
+            Console.WriteLine($"Caught an exception: {ex.Message}");
+        }
+    }
+}
+"""
+    response = requests.post(
+        f"{API_URL}/execute",
+        json={
+            "language": "csharp",
+            "code": code
+        }
+    )
+
+    if response.status_code != 200:
+        print(f"Error: {response.status_code}")
+        print(response.text)
+        return
+
+    job_id = response.json().get("job_id")
+    print(f"C# job ID: {job_id}")
+
+    # Wait for job to complete
+    time.sleep(10)
+
+    result_response = requests.get(f"{API_URL}/result/{job_id}")
+
+    if result_response.status_code != 200:
+        print(f"Error getting result: {result_response.status_code}")
+        print(result_response.text)
+        return
+
+    print("Result:")
+    print(json.dumps(result_response.json(), indent=2))
+
 if __name__ == "__main__":
     test_complex_python()
     test_complex_javascript()
     test_complex_cpp() 
+    test_complex_csharp()
