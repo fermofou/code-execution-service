@@ -1381,7 +1381,7 @@ func main() {
 	router.HandleFunc("/admin/user/{id}/badges", getUserBadgesHandler).Methods("GET", "OPTIONS")
 	router.HandleFunc("/admin/claims", getAllClaimsHandler).Methods("GET")
 	router.HandleFunc("/myRewards", getUserClaimsHandler).Methods("GET")
-	router.HandleFunc("/api/admin/stats", getAdminStats).Methods("GET")
+	router.HandleFunc("/admin/stats", getAdminStats).Methods("GET")
 
 	log.Println("API server running on port 8080")
 	log.Fatal(http.ListenAndServe("0.0.0.0:8080", router))
