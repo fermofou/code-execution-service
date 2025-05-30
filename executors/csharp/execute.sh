@@ -1,13 +1,17 @@
 #!/bin/bash
 set -e
 
+# Fetch code from provided URL
+echo "[DEBUG] Fetching code from: $CODE_URL"
 curl -s "$CODE_URL" -o Program.cs
 
-# Compile directly with csc (no MSBuild involved)
-csc Program.cs
+# Compile with Mono C# compiler (mcs) – lightweight
+echo "[DEBUG] Compiling C# code with mcs..."
+mcs Program.cs
 
-# Run the output
+# Optional: Pre-run Mono once to warm up JIT (reduces timeout risk)
+mono --version > /dev/null
+
+# Execute the compiled binary with a timeout (default 8s, configurable)
 echo "[DEBUG] Starting execution..."
-time mono Program.exe
-
-#timeout 5s ./Program.exe
+timeout ${TIMEOUT:-8}s mono Program.exe

@@ -1,16 +1,21 @@
-# Use the official Mono image for running C# code
-FROM mono:latest
+# Use a lightweight base image with Mono
+FROM debian:bullseye-slim
 
-# Set the working directory inside the container
+# Set working directory
 WORKDIR /app
 
-# Install curl for downloading code
-RUN apt-get update && apt-get install -y curl
+# Install curl and mono compiler/runtime
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    curl \
+    mono-mcs \
+    mono-runtime && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Copy the executor script
 COPY execute.sh /app/
 
-# Make the executor script executable
+# Make it executable
 RUN chmod +x /app/execute.sh
 
 # Run the executor when the container starts
