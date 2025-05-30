@@ -6,7 +6,7 @@ WORKDIR /executor
 RUN apt-get update && apt-get install -y curl
 
 # Copy the executor script
-COPY executor.sh /executor/execute.sh
+COPY execute.sh /executor/execute.sh
 
 # Make it executable
 RUN chmod +x /executor/execute.sh
