@@ -69,7 +69,9 @@ debug_log "Program.cs moved into project directory"
 
 # Build the project
 debug_log "Building project..."
-BUILD_OUTPUT=$(dotnet build "$PROJECT_DIR" -c Release --verbosity quiet 2>&1)
+#BUILD_OUTPUT=$(dotnet build "$PROJECT_DIR" -c Release --verbosity quiet 2>&1)
+debug_log "===== Build output ====="
+dotnet build "$PROJECT_DIR" -c Release --verbosity minimal
 BUILD_EXIT=$?
 
 if [ $BUILD_EXIT -ne 0 ]; then
@@ -81,7 +83,8 @@ fi
 debug_log "Build succeeded"
 
 # Find the built DLL (handle different .NET versions)
-APP_DLL=$(find "$PROJECT_DIR/bin/Release" -name "csproj.dll" | head -1)
+APP_DLL=$(find "$PROJECT_DIR/bin/Release" -name "*.dll" | grep -v 'ref' | head -1)
+#APP_DLL=$(find "$PROJECT_DIR/bin/Release" -name "csproj.dll" | head -1)
 if [ -z "$APP_DLL" ] || [ ! -f "$APP_DLL" ]; then
     echo "[ERROR] Could not find compiled DLL." >&2
     debug_log "Searched in: $PROJECT_DIR/bin/Release"
