@@ -1,17 +1,17 @@
-FROM mcr.microsoft.com/dotnet/sdk:7.0
+# Use the official Mono image for running C# code
+FROM mono:latest
 
+# Set the working directory inside the container
 WORKDIR /app
 
-# Install dependencies
+# Install curl for downloading code
 RUN apt-get update && apt-get install -y curl
 
 # Copy the executor script
-COPY execute.sh /app/execute.sh
+COPY execute.sh /app/
 
-# Make it executable
+# Make the executor script executable
 RUN chmod +x /app/execute.sh
 
-# Create shared code mount dir
-RUN mkdir -p /code && chmod 777 /code
-
-CMD ["/app/execute.sh"]
+# Run the executor when the container starts
+ENTRYPOINT ["/app/execute.sh"]
