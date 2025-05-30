@@ -70,7 +70,7 @@ echo ""
 
 # Check executor images
 echo "Executor Images:"
-for LANG in python javascript cpp; do
+for LANG in python javascript cpp csharp; do
     if docker images | grep -q "${LANG}-executor"; then
         echo "✅ ${LANG}-executor image is available"
     else

@@ -226,8 +226,8 @@ func executeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate language
-	if req.Language != "python" && req.Language != "javascript" && req.Language != "cpp" {
-		http.Error(w, "Unsupported language. Supported languages: python, javascript, cpp", http.StatusBadRequest)
+	if req.Language != "python" && req.Language != "javascript" && req.Language != "cpp" && req.Language != "csharp" {
+		http.Error(w, "Unsupported language. Supported languages: python, javascript, cpp, c#", http.StatusBadRequest)
 		return
 	}
 
