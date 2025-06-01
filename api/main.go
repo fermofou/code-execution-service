@@ -1181,6 +1181,12 @@ func updateUserBadgesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+		// Validate input
+	if len(badgeIDs) == 0 {
+		http.Error(w, "At least one badge ID is required", http.StatusBadRequest)
+		return
+	}
+
 	// hacer un query para eliminar los badges que ya no estan en la lista poniendo uno por uno
 	_, err := db.Exec(ctx, `DELETE FROM user_badge WHERE user_id = $1 AND badge_id NOT IN (SELECT unnest($2::int[]))`, userID, badgeIDs)
 	if err != nil {
