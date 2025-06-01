@@ -36,13 +36,6 @@ type CodeRequest struct {
 	Code     string `json:"code"`
 }
 
-// para leaderboard - ya no la usaba
-//
-//	type User struct {
-//		Name   string `json:"name"`
-//		Points int    `json:"points"`
-//		Level  int    `json:"level"`
-//	}
 type LeaderboardUser struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
@@ -64,6 +57,10 @@ type Job struct {
 	Language  string    `json:"language"`
 	Code      string    `json:"code"`
 	Timestamp time.Time `json:"timestamp"`
+	//TestCases string    `json:"testcases"`
+	Inputs    []string            `json:"inputs"`
+	Outputs   []string            `json:"outputs"`
+
 }
 
 type JobResult struct {
@@ -201,12 +198,13 @@ func executeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Define a struct that includes userId
+	// Define a struct that includes userId and arrays of inputs/outputs
 	type ExecuteRequest struct {
 		Language  string              `json:"language"`
 		Code      string              `json:"code"`
-		TestCases []map[string]string `json:"testCases"`
 		UserId    string              `json:"userId"`
+		Inputs    []string            `json:"inputs"`
+		Outputs   []string            `json:"outputs"`
 	}
 
 	var req ExecuteRequest
@@ -237,6 +235,8 @@ func executeHandler(w http.ResponseWriter, r *http.Request) {
 		Language:  req.Language,
 		Code:      req.Code,
 		Timestamp: time.Now(),
+		Inputs:    req.Inputs,
+		Outputs:   req.Outputs,
 	}
 
 	jobData, err := json.Marshal(job)
@@ -246,7 +246,7 @@ func executeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Push job to Redis queue
-	if err := rdb.LPush(ctx, "code_jobs", jobData).Err(); err != nil {
+	if err := rdb.LPush(ctx, "code_jobs",  jobData).Err(); err != nil {
 		http.Error(w, "Failed to enqueue job", http.StatusInternalServerError)
 		return
 	}
@@ -612,21 +612,21 @@ func getChallengeId(w http.ResponseWriter, r *http.Request) {
 	// Simple query to get problem details without any user-specific data
 	rows, err := db.Query(ctx, `   
    SELECT 
-    p.problem_id,
-    p.title,
-    p.difficulty,
-    p.question,
-    p.inputs,
-    p.outputs,
-    p.timelimit,
-    p.memorylimit,
-    p.tests,
-    NULL AS solved
-FROM 
-    problem p
-WHERE 
-    p.problem_id = $1;
-`, probID)
+    	p.problem_id,
+    	p.title,
+    	p.difficulty,
+    	p.question,
+    	p.inputs,
+    	p.outputs,
+    	p.timelimit,
+    	p.memorylimit,
+    	p.tests,
+    	NULL AS solved
+	FROM 
+    	problem p
+	WHERE 
+    	p.problem_id = $1;
+	`, probID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to retrieve problems: %v", err), http.StatusInternalServerError)
 		return
