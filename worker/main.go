@@ -222,8 +222,7 @@ func main() {
 
 	// Start HTTP server for code serving
 	http.HandleFunc("/code", codeHandler)
-	http.HandleFunc("/in", inputsHandler)
-	http.HandleFunc("/out", outputsHandler)
+	
 	port := os.Getenv("WORKER_PORT")
 	if port == "" {
 		port = "8081"
