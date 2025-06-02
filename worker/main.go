@@ -26,12 +26,15 @@ var rdb = redis.NewClient(&redis.Options{
 // Map to store code by ID
 var codeStore = make(map[string]string)
 
+
 // Job represents a code execution job
 type Job struct {
 	ID        string    `json:"id"`
 	Language  string    `json:"language"`
 	Code      string    `json:"code"`
 	Timestamp time.Time `json:"timestamp"`
+	Inputs    []string  `json:"inputs"`
+	Outputs   []string  `json:"outputs"`
 }
 
 // JobResult represents the result of a code execution
@@ -62,6 +65,7 @@ func codeHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	io.WriteString(w, code)
 }
+
 
 // executeCode executes the code in a Docker container
 func executeCode(job Job) JobResult {
@@ -106,19 +110,31 @@ func executeCode(job Job) JobResult {
 
 	// Run the container with the code ID as argument
 	containerID := fmt.Sprintf("code-exec-%s", job.ID)
+	inputStr := strings.Join(job.Inputs, "|")
+	outputStr := strings.Join(job.Outputs, "|")
 	dockerArgs := []string{
-		"run",
-		"--name", containerID,
-		"--rm",
-		"--network=code-execution-service_default", // Use the docker-compose network
-		"--memory=100m",
-		"--cpus=0.5",
-		"--pids-limit=50",
-		"-e", fmt.Sprintf("CODE_URL=http://%s:%s/code?id=%s", workerHost, workerPort, codeID),
-		"-e", fmt.Sprintf("CODE_LANGUAGE=%s", job.Language),
-		containerName,
+    	"run",
+    	"--name", containerID,
+    	"--rm",
+    	"--network=code-execution-service_default",
+    	"--memory=100m",
+    	"--cpus=0.5",
+    	"--pids-limit=50",
+    	"-e", fmt.Sprintf("CODE_URL=http://%s:%s/code?id=%s", workerHost, workerPort, codeID),
+    	"-e", fmt.Sprintf("CODE_LANGUAGE=%s", job.Language),
 	}
 
+	if (len(job.Inputs) > 0) {
+	    dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("CODE_INPUTS=%s", inputStr))
+	}
+	if (len(job.Inputs) > 0) {
+	    dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("CODE_OUTPUTS=%s", outputStr))
+	}
+
+	dockerArgs = append(dockerArgs, containerName)
+
+	
+	
 	log.Printf("Running Docker command: docker %s", strings.Join(dockerArgs, " "))
 
 	cmd := exec.Command("docker", dockerArgs...)
@@ -206,6 +222,8 @@ func main() {
 
 	// Start HTTP server for code serving
 	http.HandleFunc("/code", codeHandler)
+	http.HandleFunc("/in", inputsHandler)
+	http.HandleFunc("/out", outputsHandler)
 	port := os.Getenv("WORKER_PORT")
 	if port == "" {
 		port = "8081"
