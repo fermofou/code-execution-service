@@ -46,6 +46,7 @@ type JobResult struct {
 	ExecTime  int64     `json:"exec_time_ms"`
 	Timestamp time.Time `json:"timestamp"`
 	TestCases int 		`json:"test_cases"`
+	totalTestCases int `json:"total_test_cases"`
 }
 
 // HTTP handler for serving code files
@@ -201,6 +202,8 @@ func executeCode(job Job) JobResult {
 				Output:    fmt.Sprintf("Test #%d failed\nInput: %q\nExpected: %q\nGot: %q", i+1, input, expected, actual),
 				ExecTime:  time.Since(startTime).Milliseconds(),
 				Timestamp: time.Now(),
+				TestCases: i + 1,
+				totalTestCases: len(job.Inputs),
 			}
 		}
 	}
@@ -213,6 +216,7 @@ func executeCode(job Job) JobResult {
 			ExecTime:  time.Since(startTime).Milliseconds(),
 			Timestamp: time.Now(),
 			TestCases: len(job.Inputs),
+			totalTestCases: len(job.Inputs),
     	}
 	}
 
