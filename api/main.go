@@ -214,7 +214,7 @@ func executeHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Invalid request payload: %v", err), http.StatusBadRequest)
 		return
 	}
-	
+		log.Printf("Received execution request: %+v", req)
 	//find testcases
 		if req.UserId != "" && req.ProblemID != "" {
 		rows, err := db.Query(ctx, `
@@ -278,7 +278,7 @@ func executeHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to enqueue job", http.StatusInternalServerError)
 		return
 	}
-
+	log.Printf("redis done:")
 	if err := rdb.LPush(ctx, "code_jobs", jobData).Err(); err != nil {
 	http.Error(w, "Failed to enqueue job", http.StatusInternalServerError)
 	return

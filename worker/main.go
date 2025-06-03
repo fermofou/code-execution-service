@@ -9,11 +9,13 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
+	"github.com/joho/godotenv"
 )
 
 var ctx = context.Background()
@@ -69,18 +71,20 @@ func codeHandler(w http.ResponseWriter, r *http.Request) {
 
 // executeCode executes the code in a Docker container
 func executeCode(job Job) JobResult {
-
-		var execPath string
-		switch job.Language {
-		case "python":
-			execPath = "/app/executor.py"
-		case "javascript":
-			execPath = "/executor/executor.js"
-		case "cpp":
-			execPath = "/app/execute.sh"
-		case "csharp":
-			execPath = "/app/execute.sh" 
-		}
+	execPaths := map[string]string{
+		"python":    "/app/executor.py",
+		"javascript": "/executor/executor.js",
+		"cpp":       "/app/execute.sh",
+		"csharp":    "/app/execute.sh",
+	}
+	execPath, ok := execPaths[job.Language]
+	if !ok {
+		return JobResult{
+			JobID:     job.ID,
+			Status:    "error",
+			Error:     fmt.Sprintf("Unsupported language: %s", job.Language),
+			Timestamp: time.Now(),
+	}
 
 	startTime := time.Now()
 
@@ -101,7 +105,7 @@ func executeCode(job Job) JobResult {
 		workerPort = "8081" // Default HTTP port
 	}
 
-	// Determine container name based on language
+		// Determine container name based on language
 	var containerName string
 	switch job.Language {
 	case "python":
@@ -122,84 +126,63 @@ func executeCode(job Job) JobResult {
 		}
 	}
 
-
+	
 
 	// Run the container with the code ID as argument
 	containerID := fmt.Sprintf("code-exec-%s", job.ID)
 	validate := len(job.Inputs) > 0 && len(job.Outputs) > 0
 
 	dockerArgs := []string{
-    	"run",
-    	"--name", containerID,
-    	"--rm",
-    	"--network=code-execution-service_default",
-    	"--memory=100m",
-    	"--cpus=0.5",
-    	"--pids-limit=50",
-    	"-e", fmt.Sprintf("CODE_URL=http://%s:%s/code?id=%s", workerHost, workerPort, codeID),
-    	"-e", fmt.Sprintf("CODE_LANGUAGE=%s", job.Language),
+		"run", "-d", "--name", containerID,
+		"--network=code-execution-service_default",
+		"--memory=100m", "--cpus=0.5", "--pids-limit=50",
+		"-e", fmt.Sprintf("CODE_URL=http://%s:%s/code?id=%s", workerHost, workerPort, codeID),
+		"-e", fmt.Sprintf("CODE_LANGUAGE=%s", job.Language),
 	}
 
-	var cmd *exec.Cmd
-	var output []byte
-	var err error
-
-	
-	if (!validate) {
-		//only run code and return output
-		dockerArgs = append(dockerArgs, containerName)
-		log.Printf("Running Docker command: docker %s", strings.Join(dockerArgs, " "))
-		cmd = exec.Command("docker", dockerArgs...)
-		output, err = cmd.CombinedOutput()
-
-	}else{
-		//create directory for txt input output
-		tmpDir := "/tmp/codeexec-" + job.ID
+	var tmpDir string
+	if validate {
+		tmpDir = filepath.Join("/tmp", "codeexec-"+job.ID)
 		os.MkdirAll(tmpDir, 0755)
 		defer os.RemoveAll(tmpDir)
-
-		dockerArgs = append(dockerArgs, "-v", fmt.Sprintf("%s:/app/testdata", tmpDir))
-		dockerArgs = append(dockerArgs, "-e", "DIRTXT=/app/testdata")
-		
-		//var outputLog []string
-		input := job.Inputs[0]
-		inputPath := tmpDir + "/input.txt"
-		if err := os.WriteFile(inputPath, []byte(input), 0644); err != nil {
-				return JobResult{
-					JobID:     job.ID,
-					Status:    "error",
-					Error:     fmt.Sprintf("Failed to write first input.txt: %v", err),
-					Timestamp: time.Now(),
-				}
+		dockerArgs = append(dockerArgs, "-v", fmt.Sprintf("%s:/app/testdata", tmpDir), "-e", "DIRTXT=/app/testdata")
+	}
+	dockerArgs = append(dockerArgs, containerName)
+	if err := exec.Command("docker", dockerArgs...).Run(); err != nil {
+		return JobResult{
+			JobID:     job.ID,
+			Status:    "error",
+			Error:     fmt.Sprintf("Failed to start Docker container: %v", err),
+			Timestamp: time.Now(),
 		}
-		//start once
-		exec.Command("docker", dockerArgs...).Run()
+	}
+	defer exec.Command("docker", "rm", "-f", containerID).Run()
 
-		for i, input := range job.Inputs {
-			expected := strings.TrimSpace(job.Outputs[i])
-			inputPath := tmpDir + "/input.txt"
-			os.WriteFile(inputPath, []byte(input), 0644)
-
-			cmd := exec.Command("docker", "exec", containerID, execPath)
-			outputBytes, err := cmd.CombinedOutput()
-			actual := strings.TrimSpace(string(outputBytes))
-
-
-			if err != nil {
-				return JobResult{
-					JobID:     job.ID,
-					Status:    "error",
-					Error:     fmt.Sprintf("Failed test #%d\nDocker error: %v\nOutput: %s", i+1, err, actual),
-					ExecTime:  time.Since(startTime).Milliseconds(),
-					Timestamp: time.Now(),
-				}
+	if validate {
+		if len(job.Inputs) != len(job.Outputs) {
+			return JobResult{
+				JobID:     job.ID,
+				Status:    "error",
+				Error:     "Mismatched input/output count",
+				Timestamp: time.Now(),
 			}
-
-			if actual != expected {
+		}
+		for i, input := range job.Inputs {
+			inputPath := filepath.Join(tmpDir, "input.txt")
+			if err := os.WriteFile(inputPath, []byte(input), 0644); err != nil {
+				return JobResult{JobID: job.ID, Status: "error", Error: err.Error(), Timestamp: time.Now()}
+			}
+			execCmd := exec.Command("docker", "exec", containerID, execPath)
+			outputBytes, err := execCmd.CombinedOutput()
+			actual := strings.TrimSpace(string(outputBytes))
+			expected := strings.TrimSpace(job.Outputs[i])
+			if err != nil || actual != expected {
+				// Kill container and return on first failure
+				exec.Command("docker", "rm", "-f", containerID).Run()
 				return JobResult{
 					JobID:     job.ID,
 					Status:    "fail",
-					Output: fmt.Sprintf("Test #%d failed\nInput: %q\nExpected: %q\nGot: %q", i+1, input, expected, actual),
+					Output:    fmt.Sprintf("Test #%d failed\nInput: %q\nExpected: %q\nGot: %q", i+1, input, expected, actual),
 					ExecTime:  time.Since(startTime).Milliseconds(),
 					Timestamp: time.Now(),
 				}
@@ -215,11 +198,9 @@ func executeCode(job Job) JobResult {
 		}	
 	}
 
+	execCmd := exec.Command("docker", "logs", containerID)
+	output, err := execCmd.CombinedOutput()
 	execTime := time.Since(startTime).Milliseconds()
-
-	exec.Command("docker", "rm", "-f", containerID).Run()
-	
-	// Handle execution results
 	if err != nil {
 		if execTime >= 5000 { // 5 seconds
 			return JobResult{
