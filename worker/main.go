@@ -25,8 +25,7 @@ var rdb = redis.NewClient(&redis.Options{
 
 // Map to store code by ID
 var codeStore = make(map[string]string)
-//var inptStore = make(map[string]string)
-//var outpStore = make(map[string]string)
+
 
 // Job represents a code execution job
 type Job struct {
@@ -70,6 +69,19 @@ func codeHandler(w http.ResponseWriter, r *http.Request) {
 
 // executeCode executes the code in a Docker container
 func executeCode(job Job) JobResult {
+
+		var execPath string
+		switch job.Language {
+		case "python":
+			execPath = "/app/executor.py"
+		case "javascript":
+			execPath = "/executor/executor.js"
+		case "cpp":
+			execPath = "/app/execute.sh"
+		case "csharp":
+			execPath = "/app/execute.sh" 
+		}
+
 	startTime := time.Now()
 
 	// Store code for HTTP server
@@ -114,8 +126,8 @@ func executeCode(job Job) JobResult {
 
 	// Run the container with the code ID as argument
 	containerID := fmt.Sprintf("code-exec-%s", job.ID)
-	inputStr := strings.Join(job.Inputs, "|")
-	outputStr := strings.Join(job.Outputs, "|")
+	validate := len(job.Inputs) > 0 && len(job.Outputs) > 0
+
 	dockerArgs := []string{
     	"run",
     	"--name", containerID,
@@ -128,57 +140,88 @@ func executeCode(job Job) JobResult {
     	"-e", fmt.Sprintf("CODE_LANGUAGE=%s", job.Language),
 	}
 
-	if (len(job.Inputs) > 0) {
-	    dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("CODE_INPUTS=%s", inputStr))
-	}
-	if (len(job.Inputs) > 0) {
-	    dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("CODE_OUTPUTS=%s", outputStr))
-	}
-
-	dockerArgs = append(dockerArgs, containerName)
+	var cmd *exec.Cmd
+	var output []byte
+	var err error
 
 	
-	
-	log.Printf("Running Docker command: docker %s", strings.Join(dockerArgs, " "))
+	if (!validate) {
+		//only run code and return output
+		dockerArgs = append(dockerArgs, containerName)
+		log.Printf("Running Docker command: docker %s", strings.Join(dockerArgs, " "))
+		cmd = exec.Command("docker", dockerArgs...)
+		output, err = cmd.CombinedOutput()
 
-	cmd := exec.Command("docker", dockerArgs...)
+	}else{
+		//create directory for txt input output
+		tmpDir := "/tmp/codeexec-" + job.ID
+		os.MkdirAll(tmpDir, 0755)
+		defer os.RemoveAll(tmpDir)
 
-	output, err := cmd.CombinedOutput()
-	execTime := time.Since(startTime).Milliseconds()
-
-	resultOutput := string(output)
-	validate := len(job.Inputs) > 0 && len(job.Outputs) > 0
-
-	if validate {
-		actualOutputs := strings.Split(strings.TrimSpace(resultOutput), "|")
-		expectedOutputs := job.Outputs
-
+		dockerArgs = append(dockerArgs, "-v", fmt.Sprintf("%s:/app/testdata", tmpDir))
+		dockerArgs = append(dockerArgs, "-e", "DIRTXT=/app/testdata")
 		pass := true
-		if len(actualOutputs) != len(expectedOutputs) {
-			pass = false
-		} else {
-			for i := range actualOutputs {
-				if strings.TrimSpace(actualOutputs[i]) != strings.TrimSpace(expectedOutputs[i]) {
-					pass = false
-					break
+
+		
+		//var outputLog []string
+		input := job.Inputs[0]
+		expected := strings.TrimSpace(job.Outputs[0])
+		inputPath := tmpDir + "/input.txt"
+		if err := os.WriteFile(inputPath, []byte(input), 0644); err != nil {
+				return JobResult{
+					JobID:     job.ID,
+					Status:    "error",
+					Error:     fmt.Sprintf("Failed to write first input.txt: %v", err),
+					Timestamp: time.Now(),
+				}
+		}
+		//start once
+		exec.Command("docker", dockerArgs...).Run()
+
+		for i, input := range job.Inputs {
+			expected := strings.TrimSpace(job.Outputs[i])
+			inputPath := tmpDir + "/input.txt"
+			os.WriteFile(inputPath, []byte(input), 0644)
+
+			cmd := exec.Command("docker", "exec", containerID, execPath)
+			outputBytes, err := cmd.CombinedOutput()
+			actual := strings.TrimSpace(string(outputBytes))
+
+
+			if err != nil {
+				return JobResult{
+					JobID:     job.ID,
+					Status:    "error",
+					Error:     fmt.Sprintf("Failed test #%d\nDocker error: %v\nOutput: %s", i+1, err, actual),
+					ExecTime:  time.Since(startTime).Milliseconds(),
+					Timestamp: time.Now(),
+				}
+			}
+
+			if actual != expected {
+				return JobResult{
+					JobID:     job.ID,
+					Status:    "fail",
+					Output: fmt.Sprintf("Test #%d failed\nInput: %q\nExpected: %q\nGot: %q", i+1, input, expected, actual),
+					ExecTime:  time.Since(startTime).Milliseconds(),
+					Timestamp: time.Now(),
 				}
 			}
 		}
 
-		status := "fail"
-		if pass {
-			status = "pass"
-		}
-
 		return JobResult{
-			JobID:     job.ID,
-			Status:    status,
-			Output:    resultOutput,
-			ExecTime:  execTime,
-			Timestamp: time.Now(),
-		}
+		JobID:     job.ID,
+		Status:    "pass",
+		Output:    "All tests passed.",
+		ExecTime:  time.Since(startTime).Milliseconds(),
+		Timestamp: time.Now(),
+		}	
 	}
 
+	execTime := time.Since(startTime).Milliseconds()
+
+	resultOutput := string(output)
+	exec.Command("docker", "rm", "-f", containerID).Run()
 	
 	// Handle execution results
 	if err != nil {

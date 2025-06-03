@@ -23,16 +23,26 @@ def run_code(code_file, stdin_input):
 
 if __name__ == "__main__":
     code_url = os.environ.get('CODE_URL')
-    inputs = os.environ.get('CODE_INPUTS', '')
-    expected_outputs = os.environ.get('CODE_OUTPUTS', '')
+    dir_txt = os.environ.get('DIRTXT')  # e.g. "/app/testdata"
+    input_data = ""
 
     if not code_url:
         print("STDERR:")
         print("Error: CODE_URL environment variable not set.")
         sys.exit(1)
 
+    # If DIRTXT is set, read /app/testdata/input.txt as stdin
+    if dir_txt:
+        input_path = os.path.join(dir_txt, 'input.txt')
+        try:
+            with open(input_path, 'r') as f:
+                input_data = f.read()
+        except FileNotFoundError:
+            # If input.txt is missing, treat as empty stdin
+            input_data = ""
+
     try:
-        print(f"Fetching code from: {code_url}")
+        # Fetch the user code
         response = requests.get(code_url)
         if response.status_code != 200:
             print("STDERR:")
@@ -41,44 +51,25 @@ if __name__ == "__main__":
 
         code = response.text
 
+        # Write the code to a temp file
         with tempfile.NamedTemporaryFile(suffix='.py', delete=False) as temp_file:
             temp_file.write(code.encode('utf-8'))
             code_file = temp_file.name
 
-        # Prepare stdin input for the code
-        stdin_input = inputs.replace('|', '\n') if inputs else ""
+        # Run the user code once, feeding it input_data
+        stdout, stderr = run_code(code_file, input_data)
 
-        # Execute the code
-        stdout, stderr = run_code(code_file, stdin_input)
-
-        # Clean up temporary code file
+        # Remove the temp file
         try:
             os.unlink(code_file)
-        except Exception:
+        except OSError:
             pass
 
-        # Output raw results
+        # Print results
         print("STDOUT:")
         print(stdout)
         print("STDERR:")
         print(stderr)
-
-        # Validate if expected outputs exist
-        if expected_outputs:
-            expected_list = expected_outputs.strip().split('|')
-            actual_list = stdout.strip().splitlines()
-
-            match = actual_list == expected_list
-            print("OUTPUT_MATCH:")
-            print("true" if match else "false")
-
-            if not match:
-                print("Expected output:")
-                for line in expected_list:
-                    print(line)
-                print("Your output:")
-                for line in actual_list:
-                    print(line)
 
     except Exception as e:
         print("STDERR:")

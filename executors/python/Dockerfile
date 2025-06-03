@@ -11,5 +11,5 @@ COPY executor.py /app/
 # Make it executable
 RUN chmod +x /app/executor.py
 
-# Run the executor when the container starts
-ENTRYPOINT ["/app/executor.py"]
+# Keep the container alive indefinitely, waiting for docker exec
+ENTRYPOINT ["sh", "-c", "while true; do sleep 300; done"]
