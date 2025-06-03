@@ -160,12 +160,9 @@ func executeCode(job Job) JobResult {
 
 		dockerArgs = append(dockerArgs, "-v", fmt.Sprintf("%s:/app/testdata", tmpDir))
 		dockerArgs = append(dockerArgs, "-e", "DIRTXT=/app/testdata")
-		pass := true
-
 		
 		//var outputLog []string
 		input := job.Inputs[0]
-		expected := strings.TrimSpace(job.Outputs[0])
 		inputPath := tmpDir + "/input.txt"
 		if err := os.WriteFile(inputPath, []byte(input), 0644); err != nil {
 				return JobResult{
@@ -220,7 +217,6 @@ func executeCode(job Job) JobResult {
 
 	execTime := time.Since(startTime).Milliseconds()
 
-	resultOutput := string(output)
 	exec.Command("docker", "rm", "-f", containerID).Run()
 	
 	// Handle execution results
