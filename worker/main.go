@@ -68,6 +68,7 @@ func codeHandler(w http.ResponseWriter, r *http.Request) {
 
 // executeCode executes the code in a Docker container
 func executeCode(job Job) JobResult {
+	// Map from language to executor path inside the container
 	execPaths := map[string]string{
 		"python":    "/app/executor.py",
 		"javascript": "/executor/executor.js",
@@ -86,33 +87,32 @@ func executeCode(job Job) JobResult {
 
 	startTime := time.Now()
 
-	// Store code for HTTP server
+	// Store code for HTTP server (so executors can do an HTTP GET)
 	codeID := uuid.New().String()
 	codeStore[codeID] = job.Code
-	defer delete(codeStore, codeID) // Clean up after execution
+	defer delete(codeStore, codeID)
 
-	// Get worker hostname and port
+	// Determine worker‐host and port (for CODE_URL)
 	workerHost := os.Getenv("WORKER_HOST")
 	if workerHost == "" {
-		workerHost = "worker" // Default to service name in docker-compose
+		workerHost = "worker"
 	}
-
 	workerPort := os.Getenv("WORKER_PORT")
 	if workerPort == "" {
-		workerPort = "8081" // Default HTTP port
+		workerPort = "8081"
 	}
 
-	// Determine container image based on language
-	var containerName string
+	// Pick the executor image
+	var containerImage string
 	switch job.Language {
 	case "python":
-		containerName = "python-executor:latest"
+		containerImage = "python-executor:latest"
 	case "javascript":
-		containerName = "javascript-executor:latest"
+		containerImage = "javascript-executor:latest"
 	case "cpp":
-		containerName = "cpp-executor:latest"
+		containerImage = "cpp-executor:latest"
 	case "csharp":
-		containerName = "csharp-executor:latest"
+		containerImage = "csharp-executor:latest"
 	default:
 		return JobResult{
 			JobID:     job.ID,
@@ -122,23 +122,12 @@ func executeCode(job Job) JobResult {
 		}
 	}
 
-	// Create unique container name
-	containerID := fmt.Sprintf("code-exec-%s", job.ID)
-
-	// If we have test inputs/outputs, enter “validation” mode
+	// “validate” == we have multiple Inputs/Outputs (a submission with test cases)
 	validate := len(job.Inputs) > 0 && len(job.Outputs) > 0
-	var tmpDir string
-	if validate {
-		tmpDir = filepath.Join("/tmp", "codeexec-"+job.ID)
-		os.MkdirAll(tmpDir, 0755)
-		defer os.RemoveAll(tmpDir)
-	}
-
-	// Kill any stale container with the same name (best‐effort)
-	_ = exec.Command("docker", "rm", "-f", containerID).Run()
 
 	if validate {
-		// ─── Submissions: one container, multiple testcases ───
+		// ─── Submissions: one container, multiple test cases ───
+
 		if len(job.Inputs) != len(job.Outputs) {
 			return JobResult{
 				JobID:     job.ID,
@@ -148,41 +137,97 @@ func executeCode(job Job) JobResult {
 			}
 		}
 
-		// Start container in detached mode, so it stays up while we exec tests
-		dockerArgs := []string{
-			"run", "-d", "--name", containerID,
-			"--network=code-execution-service_default",
-			"--memory=100m", "--cpus=0.5", "--pids-limit=50",
-			"-e", fmt.Sprintf("CODE_URL=http://%s:%s/code?id=%s", workerHost, workerPort, codeID),
-			"-e", fmt.Sprintf("CODE_LANGUAGE=%s", job.Language),
-			"-v", fmt.Sprintf("%s:/app/testdata", tmpDir),
-			"-e", "DIRTXT=/app/testdata",
-			containerName,
-		}
-
-		if err := exec.Command("docker", dockerArgs...).Run(); err != nil {
+		//
+		// 1) Create a folder under /code – that is the named volume “shared-code”
+		//    Because in docker-compose we did:
+		//      - worker:   volumes: [ shared-code:/code ]
+		//      - python-executor: volumes: [ shared-code:/code ]
+		//
+		//    `/code` inside both containers refers to the same Docker volume “shared-code”.
+		//    We’ll write input.txt into /code/codeexec-<jobID>/input.txt here in the worker.
+		//
+		tmpDir := filepath.Join("/code", "codeexec-"+job.ID)
+		if err := os.MkdirAll(tmpDir, 0755); err != nil {
 			return JobResult{
 				JobID:     job.ID,
 				Status:    "error",
-				Error:     fmt.Sprintf("Failed to start Docker container: %v", err),
+				Error:     fmt.Sprintf("Failed to create tmp dir: %v", err),
 				Timestamp: time.Now(),
 			}
 		}
-		// Ensure cleanup at the very end
+		// Clean up that folder once we’re done
+		defer os.RemoveAll(tmpDir)
+
+		//
+		// 2) Launch a fresh executor container for this job, in “detached” mode.
+		//    We bind‐mount the named volume `shared-code` back into /code, so that
+		//    inside the executor, `/code/codeexec-<jobID>/input.txt` is exactly
+		//    what the worker just wrote.
+		//
+		containerID := fmt.Sprintf("code-exec-%s", job.ID)
+		_ = exec.Command("docker", "rm", "-f", containerID).Run() // best‐effort cleanup
+
+		dockerRunArgs := []string{
+			"run", "-d",
+			"--name", containerID,
+			"--network=code-execution-service_default",
+			"--memory=100m", "--cpus=0.5", "--pids-limit=50",
+			// Pass CODE_URL so executor can fetch the user’s code
+			"-e", fmt.Sprintf("CODE_URL=http://%s:%s/code?id=%s", workerHost, workerPort, codeID),
+			"-e", fmt.Sprintf("CODE_LANGUAGE=%s", job.Language),
+			// Bind‐mount the same named volume “shared-code” into /code again
+			"-v", "shared-code:/code",
+			// Tell executor: test files live under /code
+			"-e", "DIRTXT=/code",
+			containerImage,
+		}
+
+		if err := exec.Command("docker", dockerRunArgs...).Run(); err != nil {
+			return JobResult{
+				JobID:     job.ID,
+				Status:    "error",
+				Error:     fmt.Sprintf("Failed to start executor container: %v", err),
+				Timestamp: time.Now(),
+			}
+		}
+		// Ensure we remove it at the end
 		defer exec.Command("docker", "rm", "-f", containerID).Run()
 
-		// For each test: write input.txt, docker exec, compare output
+		//
+		// 3) For each test: write /code/codeexec-<jobID>/input.txt, then `docker exec`
+		//    to run /app/executor.py. Because the executor has the same “shared-code”
+		//    volume mounted at /code, it sees that file immediately.
+		//
 		for i, input := range job.Inputs {
+			// Write input.txt into the shared volume
 			inputPath := filepath.Join(tmpDir, "input.txt")
 			if err := os.WriteFile(inputPath, []byte(input), 0644); err != nil {
-				return JobResult{JobID: job.ID, Status: "error", Error: err.Error(), Timestamp: time.Now()}
+				return JobResult{
+					JobID:     job.ID,
+					Status:    "error",
+					Error:     fmt.Sprintf("Failed to write input.txt: %v", err),
+					Timestamp: time.Now(),
+				}
 			}
-			execCmd := exec.Command("docker", "exec", containerID, execPath)
+
+			// Now run executor.py via docker exec. Note that we pass env‐vars again:
+			//   - CODE_URL (so executor fetches the code)
+			//   - CODE_LANGUAGE (so executor knows which interpreter to use)
+			//   - DIRTXT=/code   (so executor reads /code/input.txt)
+			execCmd := exec.Command(
+				"docker", "exec",
+				"-e", fmt.Sprintf("CODE_URL=http://%s:%s/code?id=%s", workerHost, workerPort, codeID),
+				"-e", fmt.Sprintf("CODE_LANGUAGE=%s", job.Language),
+				"-e", "DIRTXT=/code",
+				containerID,
+				execPath,
+			)
 			outputBytes, err := execCmd.CombinedOutput()
 			actual := strings.TrimSpace(string(outputBytes))
 			expected := strings.TrimSpace(job.Outputs[i])
+
 			if err != nil || actual != expected {
-				// Kill container on first failure
+				// On first failure, kill the container and return “fail”
 				exec.Command("docker", "rm", "-f", containerID).Run()
 				return JobResult{
 					JobID:     job.ID,
@@ -204,11 +249,13 @@ func executeCode(job Job) JobResult {
 		}
 	}
 
-	// ─── Single “run” jobs: run container once, capture output, then remove ───
+	// ─── Single “run” jobs (no test inputs): run one container, capture output, then remove ───
 	//
-	// We must override the default ENTRYPOINT (“while true; do sleep; done”) so that
-	// executor.py runs immediately and then the container exits. We do this by passing
-	// "--entrypoint", execPath, which points at /app/executor.py inside the image.
+	// We will launch a fresh executor container (via `docker run --rm`) that
+	// also mounts the named volume `shared-code` at /code, in case the user’s
+	// code tries to read any files from /code (unlikely, but safe). We override
+	// the infinite‐loop ENTRYPOINT with execPath so that executor.py runs
+	// immediately and then the container exits.
 	//
 	dockerArgs := []string{
 		"run", "--rm",
@@ -217,10 +264,12 @@ func executeCode(job Job) JobResult {
 		"--memory=100m", "--cpus=0.5", "--pids-limit=50",
 		"-e", fmt.Sprintf("CODE_URL=http://%s:%s/code?id=%s", workerHost, workerPort, codeID),
 		"-e", fmt.Sprintf("CODE_LANGUAGE=%s", job.Language),
-		containerName,
+		"-v", "shared-code:/code",
+		"-e", "DIRTXT=/code",
+		containerImage,
 	}
 
-	output, err := exec.Command("docker", dockerArgs...).CombinedOutput()
+	outputBytes, err := exec.Command("docker", dockerArgs...).CombinedOutput()
 	execTime := time.Since(startTime).Milliseconds()
 	if err != nil {
 		if execTime >= 5000 {
@@ -235,7 +284,7 @@ func executeCode(job Job) JobResult {
 		return JobResult{
 			JobID:     job.ID,
 			Status:    "error",
-			Error:     fmt.Sprintf("Execution error: %v\nOutput: %s", err, string(output)),
+			Error:     fmt.Sprintf("Execution error: %v\nOutput: %s", err, string(outputBytes)),
 			ExecTime:  execTime,
 			Timestamp: time.Now(),
 		}
@@ -244,7 +293,7 @@ func executeCode(job Job) JobResult {
 	return JobResult{
 		JobID:     job.ID,
 		Status:    "success",
-		Output:    string(output),
+		Output:    string(outputBytes),
 		ExecTime:  execTime,
 		Timestamp: time.Now(),
 	}
