@@ -45,6 +45,7 @@ type JobResult struct {
 	Error     string    `json:"error"`
 	ExecTime  int64     `json:"exec_time_ms"`
 	Timestamp time.Time `json:"timestamp"`
+	TestCases int 		`json:"test_cases"`
 }
 
 // HTTP handler for serving code files
@@ -207,10 +208,11 @@ func executeCode(job Job) JobResult {
     	// All tests passed
     	return JobResult{
 			JobID:     job.ID,
-			Status:    "pass",
+			Status:    "accept",
 			Output:    "All tests passed.",
 			ExecTime:  time.Since(startTime).Milliseconds(),
 			Timestamp: time.Now(),
+			TestCases: len(job.Inputs),
     	}
 	}
 
