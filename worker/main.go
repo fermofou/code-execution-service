@@ -15,7 +15,6 @@ import (
 
 	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
-	"github.com/joho/godotenv"
 )
 
 var ctx = context.Background()
@@ -84,6 +83,7 @@ func executeCode(job Job) JobResult {
 			Status:    "error",
 			Error:     fmt.Sprintf("Unsupported language: %s", job.Language),
 			Timestamp: time.Now(),
+			}
 	}
 
 	startTime := time.Now()
@@ -231,7 +231,7 @@ func executeCode(job Job) JobResult {
 }
 
 func processJobs() {
-	for {
+	for{
 		// Pop job from Redis queue with timeout
 		result, err := rdb.BRPop(ctx, 5*time.Second, "code_jobs").Result()
 		if err != nil {
