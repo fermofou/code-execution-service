@@ -274,15 +274,12 @@ func executeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Push job to Redis queue
-	if err := rdb.LPush(ctx, "code_jobs",  jobData).Err(); err != nil {
+	if err := rdb.LPush(ctx, "code_jobs", jobData).Err(); err != nil {
 		http.Error(w, "Failed to enqueue job", http.StatusInternalServerError)
 		return
 	}
 	log.Printf("redis done:")
-	if err := rdb.LPush(ctx, "code_jobs", jobData).Err(); err != nil {
-	http.Error(w, "Failed to enqueue job", http.StatusInternalServerError)
-	return
-	}
+	
 
 	if err := rdb.HSet(ctx, "job:"+job.ID, "status", "pending").Err(); err != nil {
 		log.Printf(" Failed to set job status for %s: %v", job.ID, err)

@@ -69,6 +69,7 @@ func codeHandler(w http.ResponseWriter, r *http.Request) {
 
 
 // executeCode executes the code in a Docker container
+// executeCode executes the code in a Docker container
 func executeCode(job Job) JobResult {
 	execPaths := map[string]string{
 		"python":    "/app/executor.py",
@@ -83,7 +84,7 @@ func executeCode(job Job) JobResult {
 			Status:    "error",
 			Error:     fmt.Sprintf("Unsupported language: %s", job.Language),
 			Timestamp: time.Now(),
-			}
+		}
 	}
 
 	startTime := time.Now()
@@ -91,21 +92,19 @@ func executeCode(job Job) JobResult {
 	// Store code for HTTP server
 	codeID := uuid.New().String()
 	codeStore[codeID] = job.Code
-
 	defer delete(codeStore, codeID) // Clean up after execution
 
 	// Get worker hostname and port
 	workerHost := os.Getenv("WORKER_HOST")
 	if workerHost == "" {
-		workerHost = "worker" // Default to service name in docker-compose
+		workerHost = "worker"
 	}
-
 	workerPort := os.Getenv("WORKER_PORT")
 	if workerPort == "" {
-		workerPort = "8081" // Default HTTP port
+		workerPort = "8081"
 	}
 
-		// Determine container name based on language
+	// Determine container image based on language
 	var containerName string
 	switch job.Language {
 	case "python":
@@ -116,7 +115,6 @@ func executeCode(job Job) JobResult {
 		containerName = "cpp-executor:latest"
 	case "csharp":
 		containerName = "csharp-executor:latest"
-
 	default:
 		return JobResult{
 			JobID:     job.ID,
@@ -126,39 +124,22 @@ func executeCode(job Job) JobResult {
 		}
 	}
 
-	
-
-	// Run the container with the code ID as argument
+	// Create unique container name
 	containerID := fmt.Sprintf("code-exec-%s", job.ID)
+
 	validate := len(job.Inputs) > 0 && len(job.Outputs) > 0
-
-	dockerArgs := []string{
-		"run", "-d", "--name", containerID,
-		"--network=code-execution-service_default",
-		"--memory=100m", "--cpus=0.5", "--pids-limit=50",
-		"-e", fmt.Sprintf("CODE_URL=http://%s:%s/code?id=%s", workerHost, workerPort, codeID),
-		"-e", fmt.Sprintf("CODE_LANGUAGE=%s", job.Language),
-	}
-
 	var tmpDir string
 	if validate {
 		tmpDir = filepath.Join("/tmp", "codeexec-"+job.ID)
 		os.MkdirAll(tmpDir, 0755)
 		defer os.RemoveAll(tmpDir)
-		dockerArgs = append(dockerArgs, "-v", fmt.Sprintf("%s:/app/testdata", tmpDir), "-e", "DIRTXT=/app/testdata")
 	}
-	dockerArgs = append(dockerArgs, containerName)
-	if err := exec.Command("docker", dockerArgs...).Run(); err != nil {
-		return JobResult{
-			JobID:     job.ID,
-			Status:    "error",
-			Error:     fmt.Sprintf("Failed to start Docker container: %v", err),
-			Timestamp: time.Now(),
-		}
-	}
-	defer exec.Command("docker", "rm", "-f", containerID).Run()
+
+	// Kill any stale container with same name (just in case)
+	_ = exec.Command("docker", "rm", "-f", containerID).Run()
 
 	if validate {
+		// Validate using docker run -d + exec loop
 		if len(job.Inputs) != len(job.Outputs) {
 			return JobResult{
 				JobID:     job.ID,
@@ -167,6 +148,28 @@ func executeCode(job Job) JobResult {
 				Timestamp: time.Now(),
 			}
 		}
+
+		dockerArgs := []string{
+			"run", "-d", "--name", containerID,
+			"--network=code-execution-service_default",
+			"--memory=100m", "--cpus=0.5", "--pids-limit=50",
+			"-e", fmt.Sprintf("CODE_URL=http://%s:%s/code?id=%s", workerHost, workerPort, codeID),
+			"-e", fmt.Sprintf("CODE_LANGUAGE=%s", job.Language),
+			"-v", fmt.Sprintf("%s:/app/testdata", tmpDir),
+			"-e", "DIRTXT=/app/testdata",
+			containerName,
+		}
+
+		if err := exec.Command("docker", dockerArgs...).Run(); err != nil {
+			return JobResult{
+				JobID:     job.ID,
+				Status:    "error",
+				Error:     fmt.Sprintf("Failed to start Docker container: %v", err),
+				Timestamp: time.Now(),
+			}
+		}
+		defer exec.Command("docker", "rm", "-f", containerID).Run()
+
 		for i, input := range job.Inputs {
 			inputPath := filepath.Join(tmpDir, "input.txt")
 			if err := os.WriteFile(inputPath, []byte(input), 0644); err != nil {
@@ -190,19 +193,28 @@ func executeCode(job Job) JobResult {
 		}
 
 		return JobResult{
-		JobID:     job.ID,
-		Status:    "pass",
-		Output:    "All tests passed.",
-		ExecTime:  time.Since(startTime).Milliseconds(),
-		Timestamp: time.Now(),
-		}	
+			JobID:     job.ID,
+			Status:    "pass",
+			Output:    "All tests passed.",
+			ExecTime:  time.Since(startTime).Milliseconds(),
+			Timestamp: time.Now(),
+		}
 	}
 
-	execCmd := exec.Command("docker", "logs", containerID)
-	output, err := execCmd.CombinedOutput()
+	// Run-only jobs (no test validation): execute directly and collect output
+	dockerArgs := []string{
+		"run", "--rm",
+		"--network=code-execution-service_default",
+		"--memory=100m", "--cpus=0.5", "--pids-limit=50",
+		"-e", fmt.Sprintf("CODE_URL=http://%s:%s/code?id=%s", workerHost, workerPort, codeID),
+		"-e", fmt.Sprintf("CODE_LANGUAGE=%s", job.Language),
+		containerName,
+	}
+
+	output, err := exec.Command("docker", dockerArgs...).CombinedOutput()
 	execTime := time.Since(startTime).Milliseconds()
 	if err != nil {
-		if execTime >= 5000 { // 5 seconds
+		if execTime >= 5000 {
 			return JobResult{
 				JobID:     job.ID,
 				Status:    "timeout",
@@ -211,7 +223,6 @@ func executeCode(job Job) JobResult {
 				Timestamp: time.Now(),
 			}
 		}
-
 		return JobResult{
 			JobID:     job.ID,
 			Status:    "error",
@@ -229,6 +240,7 @@ func executeCode(job Job) JobResult {
 		Timestamp: time.Now(),
 	}
 }
+
 
 func processJobs() {
 	for{
