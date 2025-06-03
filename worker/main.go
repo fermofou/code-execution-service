@@ -122,8 +122,6 @@ func executeCode(job Job) JobResult {
 		}
 	}
 
-
-
 	// Run the container with the code ID as argument
 	containerID := fmt.Sprintf("code-exec-%s", job.ID)
 	validate := len(job.Inputs) > 0 && len(job.Outputs) > 0
@@ -150,6 +148,7 @@ func executeCode(job Job) JobResult {
 		dockerArgs = append(dockerArgs, containerName)
 		log.Printf("Running Docker command: docker %s", strings.Join(dockerArgs, " "))
 		cmd = exec.Command("docker", dockerArgs...)
+		
 		output, err = cmd.CombinedOutput()
 
 	}else{
@@ -216,7 +215,6 @@ func executeCode(job Job) JobResult {
 	}
 
 	execTime := time.Since(startTime).Milliseconds()
-
 	exec.Command("docker", "rm", "-f", containerID).Run()
 	
 	// Handle execution results
@@ -283,7 +281,7 @@ func processJobs() {
 		}
 
 		// Store result with expiration (24 hours)
-		if err := rdb.Set(ctx, "result:"+job.ID, resultData, 24*time.Hour).Err(); err != nil {
+		if err := rdb.Set(ctx, "result:"+job.ID, resultData, 10*time.Hour).Err(); err != nil {
 			log.Printf("Error storing result in Redis: %v", err)
 		}
 	}
