@@ -27,7 +27,6 @@ var rdb = redis.NewClient(&redis.Options{
 // Map to store code by ID
 var codeStore = make(map[string]string)
 
-
 // Job represents a code execution job
 type Job struct {
 	ID        string    `json:"id"`
@@ -67,8 +66,6 @@ func codeHandler(w http.ResponseWriter, r *http.Request) {
 	io.WriteString(w, code)
 }
 
-
-// executeCode executes the code in a Docker container
 // executeCode executes the code in a Docker container
 func executeCode(job Job) JobResult {
 	execPaths := map[string]string{
@@ -97,11 +94,12 @@ func executeCode(job Job) JobResult {
 	// Get worker hostname and port
 	workerHost := os.Getenv("WORKER_HOST")
 	if workerHost == "" {
-		workerHost = "worker"
+		workerHost = "worker" // Default to service name in docker-compose
 	}
+
 	workerPort := os.Getenv("WORKER_PORT")
 	if workerPort == "" {
-		workerPort = "8081"
+		workerPort = "8081" // Default HTTP port
 	}
 
 	// Determine container image based on language
@@ -127,6 +125,7 @@ func executeCode(job Job) JobResult {
 	// Create unique container name
 	containerID := fmt.Sprintf("code-exec-%s", job.ID)
 
+	// If we have test inputs/outputs, enter “validation” mode
 	validate := len(job.Inputs) > 0 && len(job.Outputs) > 0
 	var tmpDir string
 	if validate {
@@ -135,11 +134,11 @@ func executeCode(job Job) JobResult {
 		defer os.RemoveAll(tmpDir)
 	}
 
-	// Kill any stale container with same name (just in case)
+	// Kill any stale container with the same name (best‐effort)
 	_ = exec.Command("docker", "rm", "-f", containerID).Run()
 
 	if validate {
-		// Validate using docker run -d + exec loop
+		// ─── Submissions: one container, multiple testcases ───
 		if len(job.Inputs) != len(job.Outputs) {
 			return JobResult{
 				JobID:     job.ID,
@@ -149,6 +148,7 @@ func executeCode(job Job) JobResult {
 			}
 		}
 
+		// Start container in detached mode, so it stays up while we exec tests
 		dockerArgs := []string{
 			"run", "-d", "--name", containerID,
 			"--network=code-execution-service_default",
@@ -168,8 +168,10 @@ func executeCode(job Job) JobResult {
 				Timestamp: time.Now(),
 			}
 		}
+		// Ensure cleanup at the very end
 		defer exec.Command("docker", "rm", "-f", containerID).Run()
 
+		// For each test: write input.txt, docker exec, compare output
 		for i, input := range job.Inputs {
 			inputPath := filepath.Join(tmpDir, "input.txt")
 			if err := os.WriteFile(inputPath, []byte(input), 0644); err != nil {
@@ -180,7 +182,7 @@ func executeCode(job Job) JobResult {
 			actual := strings.TrimSpace(string(outputBytes))
 			expected := strings.TrimSpace(job.Outputs[i])
 			if err != nil || actual != expected {
-				// Kill container and return on first failure
+				// Kill container on first failure
 				exec.Command("docker", "rm", "-f", containerID).Run()
 				return JobResult{
 					JobID:     job.ID,
@@ -192,6 +194,7 @@ func executeCode(job Job) JobResult {
 			}
 		}
 
+		// All tests passed
 		return JobResult{
 			JobID:     job.ID,
 			Status:    "pass",
@@ -201,9 +204,15 @@ func executeCode(job Job) JobResult {
 		}
 	}
 
-	// Run-only jobs (no test validation): execute directly and collect output
+	// ─── Single “run” jobs: run container once, capture output, then remove ───
+	//
+	// We must override the default ENTRYPOINT (“while true; do sleep; done”) so that
+	// executor.py runs immediately and then the container exits. We do this by passing
+	// "--entrypoint", execPath, which points at /app/executor.py inside the image.
+	//
 	dockerArgs := []string{
 		"run", "--rm",
+		"--entrypoint", execPath,
 		"--network=code-execution-service_default",
 		"--memory=100m", "--cpus=0.5", "--pids-limit=50",
 		"-e", fmt.Sprintf("CODE_URL=http://%s:%s/code?id=%s", workerHost, workerPort, codeID),
@@ -241,9 +250,8 @@ func executeCode(job Job) JobResult {
 	}
 }
 
-
 func processJobs() {
-	for{
+	for {
 		// Pop job from Redis queue with timeout
 		result, err := rdb.BRPop(ctx, 5*time.Second, "code_jobs").Result()
 		if err != nil {
@@ -278,6 +286,8 @@ func processJobs() {
 		// Store result with expiration (24 hours)
 		if err := rdb.Set(ctx, "result:"+job.ID, resultData, 24*time.Hour).Err(); err != nil {
 			log.Printf("Error storing result in Redis: %v", err)
+		} else {
+			log.Printf("Result stored in Redis for job %s (status: %s)", job.ID, jobResult.Status)
 		}
 	}
 }
@@ -292,7 +302,7 @@ func main() {
 
 	// Start HTTP server for code serving
 	http.HandleFunc("/code", codeHandler)
-	
+
 	port := os.Getenv("WORKER_PORT")
 	if port == "" {
 		port = "8081"
