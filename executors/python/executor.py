@@ -13,22 +13,20 @@ def run_code(code_file, stdin_input):
 
 if __name__ == "__main__":
     code_url = os.environ.get("CODE_URL")
-    dir_txt = os.environ.get("DIRTXT", "/code")
+    is_single_run = os.environ.get("SINGLE") is not None
     input_data = ""
     
     if not code_url:
         print("Error: CODE_URL not set", file=sys.stderr)
         sys.exit(1)
 
-    # Try to read from input.txt first
-    input_path = os.path.join(dir_txt, "input.txt")
-    if os.path.exists(input_path):
-        with open(input_path, "r") as f:
-            input_data = f.read()
-    else:
-        # If no input.txt, read from stdin (this handles the docker exec -i case)
-        if not sys.stdin.isatty():  # Check if stdin has data
+    if is_single_run:
+        # Single run: read from stdin if available
+        if not sys.stdin.isatty():
             input_data = sys.stdin.read()
+    else:
+        # Test run: always read from stdin (piped via docker exec -i)
+        input_data = sys.stdin.read()
 
     # Fetch user-submitted code
     r = requests.get(code_url)

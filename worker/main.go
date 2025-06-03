@@ -46,7 +46,7 @@ type JobResult struct {
 	ExecTime  int64     `json:"exec_time_ms"`
 	Timestamp time.Time `json:"timestamp"`
 	TestCases int 		`json:"test_cases"`
-	totalTestCases int `json:"total_test_cases"`
+	TotalCases  int 	`json:"total_cases"`
 }
 
 // HTTP handler for serving code files
@@ -128,85 +128,60 @@ func executeCode(job Job) JobResult {
 	validate := len(job.Inputs) > 0 && len(job.Outputs) > 0
 
 	if validate {
-    // 1) Create the per-job folder under /code
-    tmpDir := filepath.Join("/code", "codeexec-"+job.ID)
-    if err := os.MkdirAll(tmpDir, 0755); err != nil {
-        return JobResult{
-            JobID:     job.ID,
-            Status:    "error",
-            Error:     fmt.Sprintf("Failed to create tmpDir: %v", err),
-            Timestamp: time.Now(),
-        }
-    }
-    defer os.RemoveAll(tmpDir) // cleanup at the end
+		
+		// 2) Start one detached executor container (it sees /code as the shared volume)
+		containerID := fmt.Sprintf("code-exec-%s", job.ID)
+		_ = exec.Command("docker", "rm", "-f", containerID).Run() // best‐effort cleanup
 
-    // 2) Start one detached executor container (it sees /code as the shared volume)
-    containerID := fmt.Sprintf("code-exec-%s", job.ID)
-    _ = exec.Command("docker", "rm", "-f", containerID).Run() // best‐effort cleanup
-
-    dockerRunArgs := []string{
-        "run", "-d",
-        "--name", containerID,
-        "--network=code-execution-service_default",
-        "--memory=100m", "--cpus=0.5", "--pids-limit=50",
-        "-e", fmt.Sprintf("CODE_URL=http://%s:%s/code?id=%s", workerHost, workerPort, codeID),
-        "-e", fmt.Sprintf("CODE_LANGUAGE=%s", job.Language),
-        "-v", "shared-code:/code",
-        containerImage,
-    }
-    if err := exec.Command("docker", dockerRunArgs...).Run(); err != nil {
-        return JobResult{
-            JobID:     job.ID,
-            Status:    "error",
-            Error:     fmt.Sprintf("Failed to start executor container: %v", err),
-            Timestamp: time.Now(),
-        }
-    }
-    defer exec.Command("docker", "rm", "-f", containerID).Run()
-
-    // 3) For each test, write input.txt into /code/codeexec-<ID>, then `docker exec` with DIRTXT pointed there
-    for i, input := range job.Inputs {
-		// We don't actually need to write to input.txt since we're piping via stdin
-		// But keeping it for compatibility if your executor needs it
-		inputPath := filepath.Join(tmpDir, "input.txt")
-		if err := os.WriteFile(inputPath, []byte(input), 0644); err != nil {
+		dockerRunArgs := []string{
+			"run", "-d",
+			"--name", containerID,
+			"--network=code-execution-service_default",
+			"--memory=100m", "--cpus=0.5", "--pids-limit=50",
+			"-e", fmt.Sprintf("CODE_URL=http://%s:%s/code?id=%s", workerHost, workerPort, codeID),
+			"-e", fmt.Sprintf("CODE_LANGUAGE=%s", job.Language),
+			containerImage,
+		}
+		if err := exec.Command("docker", dockerRunArgs...).Run(); err != nil {
 			return JobResult{
 				JobID:     job.ID,
 				Status:    "error",
-				Error:     fmt.Sprintf("Failed to write input.txt: %v", err),
+				Error:     fmt.Sprintf("Failed to start executor container: %v", err),
 				Timestamp: time.Now(),
 			}
 		}
+		defer exec.Command("docker", "rm", "-f", containerID).Run()
 
-		execCmd := exec.Command(
-			"docker", "exec", "-i", // Add -i flag for interactive stdin
-			"-e", fmt.Sprintf("CODE_URL=http://%s:%s/code?id=%s", workerHost, workerPort, codeID),
-			"-e", fmt.Sprintf("CODE_LANGUAGE=%s", job.Language),
-			"-e", fmt.Sprintf("DIRTXT=/code/codeexec-%s", job.ID),
-			containerID,
-			execPath,
-		)
-		
-		// Provide input via stdin
-		execCmd.Stdin = strings.NewReader(input)
-		
-		outputBytes, err := execCmd.CombinedOutput()
-		actual := strings.TrimSpace(string(outputBytes))
-		expected := strings.TrimSpace(job.Outputs[i])
+		for i, input := range job.Inputs {
 
-		if err != nil || actual != expected {
-			exec.Command("docker", "rm", "-f", containerID).Run()
-			return JobResult{
-				JobID:     job.ID,
-				Status:    "fail",
-				Output:    fmt.Sprintf("Test #%d failed\nInput: %q\nExpected: %q\nGot: %q", i+1, input, expected, actual),
-				ExecTime:  time.Since(startTime).Milliseconds(),
-				Timestamp: time.Now(),
-				TestCases: i + 1,
-				totalTestCases: len(job.Inputs),
+			execCmd := exec.Command(
+				"docker", "exec", "-i", // Add -i flag for interactive stdin
+				"-e", fmt.Sprintf("CODE_URL=http://%s:%s/code?id=%s", workerHost, workerPort, codeID),
+				"-e", fmt.Sprintf("CODE_LANGUAGE=%s", job.Language),
+				containerID,
+				execPath,
+			)
+			
+			// Provide input via stdin
+			execCmd.Stdin = strings.NewReader(input)
+			
+			outputBytes, err := execCmd.CombinedOutput()
+			actual := strings.TrimSpace(string(outputBytes))
+			expected := strings.TrimSpace(job.Outputs[i])
+
+			if err != nil || actual != expected {
+				exec.Command("docker", "rm", "-f", containerID).Run()
+				return JobResult{
+					JobID:     job.ID,
+					Status:    "fail",
+					Output:    fmt.Sprintf("Test #%d failed\nInput: %q\nExpected: %q\nGot: %q", i+1, input, expected, actual),
+					ExecTime:  time.Since(startTime).Milliseconds(),
+					Timestamp: time.Now(),
+					TestCases: i + 1,
+					TotalCases: len(job.Inputs),
+				}
 			}
 		}
-	}
 
     	// All tests passed
     	return JobResult{
@@ -216,7 +191,7 @@ func executeCode(job Job) JobResult {
 			ExecTime:  time.Since(startTime).Milliseconds(),
 			Timestamp: time.Now(),
 			TestCases: len(job.Inputs),
-			totalTestCases: len(job.Inputs),
+			TotalCases: len(job.Inputs),
     	}
 	}
 
@@ -229,8 +204,8 @@ func executeCode(job Job) JobResult {
 		"--memory=100m", "--cpus=0.5", "--pids-limit=50",
 		"-e", fmt.Sprintf("CODE_URL=http://%s:%s/code?id=%s", workerHost, workerPort, codeID),
 		"-e", fmt.Sprintf("CODE_LANGUAGE=%s", job.Language),
+		"-e", "SINGLE=1", // Much clearer!
 		"-v", "shared-code:/code",
-		"-e", "DIRTXT=/code",
 		containerImage,
 	}
 
