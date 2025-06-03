@@ -164,39 +164,45 @@ func executeCode(job Job) JobResult {
 
     // 3) For each test, write input.txt into /code/codeexec-<ID>, then `docker exec` with DIRTXT pointed there
     for i, input := range job.Inputs {
-        inputPath := filepath.Join(tmpDir, "input.txt")
-        if err := os.WriteFile(inputPath, []byte(input), 0644); err != nil {
-            return JobResult{
-                JobID:     job.ID,
-                Status:    "error",
-                Error:     fmt.Sprintf("Failed to write input.txt: %v", err),
-                Timestamp: time.Now(),
-            }
-        }
+		// We don't actually need to write to input.txt since we're piping via stdin
+		// But keeping it for compatibility if your executor needs it
+		inputPath := filepath.Join(tmpDir, "input.txt")
+		if err := os.WriteFile(inputPath, []byte(input), 0644); err != nil {
+			return JobResult{
+				JobID:     job.ID,
+				Status:    "error",
+				Error:     fmt.Sprintf("Failed to write input.txt: %v", err),
+				Timestamp: time.Now(),
+			}
+		}
 
-        execCmd := exec.Command(
-            "docker", "exec",
-            "-e", fmt.Sprintf("CODE_URL=http://%s:%s/code?id=%s", workerHost, workerPort, codeID),
-            "-e", fmt.Sprintf("CODE_LANGUAGE=%s", job.Language),
-            "-e", fmt.Sprintf("DIRTXT=/code/codeexec-%s", job.ID),
-            containerID,
-            execPath,
-        )
-        outputBytes, err := execCmd.CombinedOutput()
-        actual := strings.TrimSpace(string(outputBytes))
-        expected := strings.TrimSpace(job.Outputs[i])
+		execCmd := exec.Command(
+			"docker", "exec", "-i", // Add -i flag for interactive stdin
+			"-e", fmt.Sprintf("CODE_URL=http://%s:%s/code?id=%s", workerHost, workerPort, codeID),
+			"-e", fmt.Sprintf("CODE_LANGUAGE=%s", job.Language),
+			"-e", fmt.Sprintf("DIRTXT=/code/codeexec-%s", job.ID),
+			containerID,
+			execPath,
+		)
+		
+		// Provide input via stdin
+		execCmd.Stdin = strings.NewReader(input)
+		
+		outputBytes, err := execCmd.CombinedOutput()
+		actual := strings.TrimSpace(string(outputBytes))
+		expected := strings.TrimSpace(job.Outputs[i])
 
-        if err != nil || actual != expected {
-            exec.Command("docker", "rm", "-f", containerID).Run()
-            return JobResult{
-                JobID:     job.ID,
-                Status:    "fail",
-                Output:    fmt.Sprintf("Test #%d failed\nInput: %q\nExpected: %q\nGot: %q", i+1, input, expected, actual),
-                ExecTime:  time.Since(startTime).Milliseconds(),
-                Timestamp: time.Now(),
-            }
-        }
-    }
+		if err != nil || actual != expected {
+			exec.Command("docker", "rm", "-f", containerID).Run()
+			return JobResult{
+				JobID:     job.ID,
+				Status:    "fail",
+				Output:    fmt.Sprintf("Test #%d failed\nInput: %q\nExpected: %q\nGot: %q", i+1, input, expected, actual),
+				ExecTime:  time.Since(startTime).Milliseconds(),
+				Timestamp: time.Now(),
+			}
+		}
+	}
 
     	// All tests passed
     	return JobResult{
