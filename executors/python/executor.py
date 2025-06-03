@@ -45,36 +45,34 @@ if __name__ == "__main__":
             temp_file.write(code.encode('utf-8'))
             code_file = temp_file.name
 
-        # Prepare stdin input (multiple lines)
+        # Prepare stdin input for the code
         stdin_input = inputs.replace('|', '\n') if inputs else ""
 
-        # Run the code
+        # Execute the code
         stdout, stderr = run_code(code_file, stdin_input)
 
-        # Clean up temp file
+        # Clean up temporary code file
         try:
             os.unlink(code_file)
-        except:
+        except Exception:
             pass
 
+        # Output raw results
         print("STDOUT:")
         print(stdout)
         print("STDERR:")
         print(stderr)
 
-        # Optional output validation
+        # Validate if expected outputs exist
         if expected_outputs:
             expected_list = expected_outputs.strip().split('|')
             actual_list = stdout.strip().splitlines()
 
-            if actual_list == expected_list:
-                match = "true"
-                print("OUTPUT_MATCH:")
-                print(match)
-            else:
-                match = "false"
-                print("OUTPUT_MATCH:")
-                print(match)
+            match = actual_list == expected_list
+            print("OUTPUT_MATCH:")
+            print("true" if match else "false")
+
+            if not match:
                 print("Expected output:")
                 for line in expected_list:
                     print(line)
@@ -82,7 +80,6 @@ if __name__ == "__main__":
                 for line in actual_list:
                     print(line)
 
-            
     except Exception as e:
         print("STDERR:")
         print(f"Error: {str(e)}")

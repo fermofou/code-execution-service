@@ -198,13 +198,15 @@ func executeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Define a struct that includes userId and arrays of inputs/outputs
+	// struct that includes possible userId and prob id
 	type ExecuteRequest struct {
 		Language  string              `json:"language"`
 		Code      string              `json:"code"`
 		UserId    string              `json:"userId"`
-		Inputs    []string            `json:"inputs"`
-		Outputs   []string            `json:"outputs"`
+		ProblemID string 			  `json:"probId"`
+		Inputs  []string
+		Outputs []string
+
 	}
 
 	var req ExecuteRequest
@@ -212,13 +214,39 @@ func executeHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Invalid request payload: %v", err), http.StatusBadRequest)
 		return
 	}
+	
+	//find testcases
+		if req.UserId != "" && req.ProblemID != "" {
+		rows, err := db.Query(ctx, `
+			SELECT t.tin, t.tout
+			FROM testcases t
+			JOIN problem p ON p.problem_id = t.problem_id
+			WHERE p.problem_id = $1;
+		`, req.ProblemID)
 
-	if req.Language == "" || req.Code == "" {
-		http.Error(w, "Missing required fields (language, code)", http.StatusBadRequest)
-		return
+		if err != nil {
+			log.Printf("Warning: failed to fetch testcases for problem %s: %v", req.ProblemID, err)
+			// Continue without testcases
+		} else {
+			defer rows.Close()
+
+			for rows.Next() {
+				var input, output string
+				if err := rows.Scan(&input, &output); err != nil {
+					log.Printf("Warning: error reading testcase row: %v", err)
+					continue // Skip this testcase
+				}
+				req.Inputs = append(req.Inputs, input)
+				req.Outputs = append(req.Outputs, output)
+			}
+
+			if err := rows.Err(); err != nil {
+				log.Printf("Warning: error iterating over testcases: %v", err)
+			}
+		}
 	}
 
-	// Log received user ID if available
+	// Log received user ID if available, si es submission
 	if req.UserId != "" {
 		fmt.Printf("Received execution request from user: %s\n", req.UserId)
 	}
@@ -869,21 +897,7 @@ func uploadTestCases(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// insertar en la base de datos que tiene este formato
-
-		/*
-			create table if not exists testcases (
-			    testcase_id serial primary key,
-			    problem_id integer not null,
-			    tin text not null,
-			    tout text not null,
-			    constraint fk_problem
-			        foreign key (problem_id)
-			        references problem (problem_id)
-			        on delete cascade
-			);
-		*/
-
+		
 		_, err := db.Exec(ctx, `INSERT INTO testcases (problem_id, tin, tout) VALUES ($1, $2, $3)`, problemID, files.In, files.Out)
 		if err != nil {
 			fmt.Println("Error inserting test case into database:", err)

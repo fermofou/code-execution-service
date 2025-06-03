@@ -25,7 +25,8 @@ var rdb = redis.NewClient(&redis.Options{
 
 // Map to store code by ID
 var codeStore = make(map[string]string)
-
+//var inptStore = make(map[string]string)
+//var outpStore = make(map[string]string)
 
 // Job represents a code execution job
 type Job struct {
@@ -74,6 +75,7 @@ func executeCode(job Job) JobResult {
 	// Store code for HTTP server
 	codeID := uuid.New().String()
 	codeStore[codeID] = job.Code
+
 	defer delete(codeStore, codeID) // Clean up after execution
 
 	// Get worker hostname and port
@@ -107,6 +109,8 @@ func executeCode(job Job) JobResult {
 			Timestamp: time.Now(),
 		}
 	}
+
+
 
 	// Run the container with the code ID as argument
 	containerID := fmt.Sprintf("code-exec-%s", job.ID)
@@ -142,6 +146,40 @@ func executeCode(job Job) JobResult {
 	output, err := cmd.CombinedOutput()
 	execTime := time.Since(startTime).Milliseconds()
 
+	resultOutput := string(output)
+	validate := len(job.Inputs) > 0 && len(job.Outputs) > 0
+
+	if validate {
+		actualOutputs := strings.Split(strings.TrimSpace(resultOutput), "|")
+		expectedOutputs := job.Outputs
+
+		pass := true
+		if len(actualOutputs) != len(expectedOutputs) {
+			pass = false
+		} else {
+			for i := range actualOutputs {
+				if strings.TrimSpace(actualOutputs[i]) != strings.TrimSpace(expectedOutputs[i]) {
+					pass = false
+					break
+				}
+			}
+		}
+
+		status := "fail"
+		if pass {
+			status = "pass"
+		}
+
+		return JobResult{
+			JobID:     job.ID,
+			Status:    status,
+			Output:    resultOutput,
+			ExecTime:  execTime,
+			Timestamp: time.Now(),
+		}
+	}
+
+	
 	// Handle execution results
 	if err != nil {
 		if execTime >= 5000 { // 5 seconds
