@@ -1,6 +1,6 @@
 # Servicio de Ejecución de Código Remoto
 
-Esta plataforma ha sido diseñada para ejecutar de forma segura y remota fragmentos de código enviados por los usuarios, siendo ideal para entornos de *coding challenges*. Utiliza contenedores Docker para aislar y ejecutar el código, garantizando que cada contenedor se destruya después de la ejecución. Además, está preparada para soportar múltiples usuarios concurrentes, escalando de manera eficiente según la demanda.
+Esta plataforma ha sido diseñada para ejecutar de forma segura y remota fragmentos de código enviados por los usuarios, siendo ideal para entornos de _coding challenges_. Utiliza contenedores Docker para aislar y ejecutar el código, garantizando que cada contenedor se destruya después de la ejecución. Además, está preparada para soportar múltiples usuarios concurrentes, escalando de manera eficiente según la demanda.
 
 ## Tabla de Contenidos
 
@@ -10,8 +10,9 @@ Esta plataforma ha sido diseñada para ejecutar de forma segura y remota fragmen
   - [2. Encolado del Trabajo](#2-encolado-del-trabajo)
   - [3. Procesamiento por el Worker](#3-procesamiento-por-el-worker)
   - [4. Ejecución en el Contenedor Docker](#4-ejecución-en-el-contenedor-docker)
-  - [5. Manejo y Almacenamiento de Resultados](#5-manejo-y-almacenamiento-de-resultados)
-  - [6. Recuperación del Resultado](#6-recuperación-del-resultado)
+  - [5. Validación Automática de Resultados](#5-validación-automática-de-resultados)
+  - [6. Manejo y Almacenamiento de Resultados](#6-manejo-y-almacenamiento-de-resultados)
+  - [7. Recuperación del Resultado](#7-recuperación-del-resultado)
 - [Arquitectura de Red y Comunicación](#arquitectura-de-red-y-comunicación)
 - [Ventajas del Enfoque HTTP](#ventajas-del-enfoque-http)
 - [Consideraciones de Seguridad](#consideraciones-de-seguridad)
@@ -38,7 +39,7 @@ A continuación se detalla el flujo completo desde que se realiza la solicitud h
 
 ### 3. Procesamiento por el Worker
 
-- **Polling de Redis:** Un servicio *worker* ejecutándose en `worker/main.go` monitorea la cola `code_jobs` utilizando el comando `BRPOP` para retirar trabajos de forma bloqueante.
+- **Polling de Redis:** Un servicio _worker_ ejecutándose en `worker/main.go` monitorea la cola `code_jobs` utilizando el comando `BRPOP` para retirar trabajos de forma bloqueante.
 - **Deserialización:** Al recibir un trabajo, el worker deserializa el JSON a un objeto `Job`.
 - **Ejecución del Código:** Se invoca la función `executeCode`, encargada de gestionar el proceso de ejecución.
 
@@ -56,10 +57,22 @@ A continuación se detalla el flujo completo desde que se realiza la solicitud h
     - **Python:** Se ejecuta con el intérprete `python`.
     - **JavaScript:** Se ejecuta con Node.js.
     - **C++:** Se compila con `g++` y se ejecuta el binario resultante.
+    - **C#:** Se compila con Mono C# compiler (mcs), ideal para ejecución rápida de un solo archivo.
   - Se capturan la salida estándar y los errores generados durante la ejecución.
   - Los archivos temporales se eliminan tras la ejecución.
 
-### 5. Manejo y Almacenamiento de Resultados
+### 5. Validación Automática de Resultados
+
+- **Comparación de Salidas:**
+
+  - En caso de ser una submission y no solo una ejecución de código,por cada entrada de prueba, la salida generada por el código se compara contra el resultado esperado.
+  - Si alguna salida no coincide, el test case falla y se detalla cuál falló (input, output esperado vs. obtenido).
+
+- **Estructura del Resultado:**
+
+  - Se incluye un resumen por cada test case: éxito o falla, con detalles precisos.
+
+### 6. Manejo y Almacenamiento de Resultados
 
 - **Captura del Resultado:** Una vez finalizada la ejecución, el contenedor devuelve los resultados (salida, errores y tiempos de ejecución) a la aplicación worker.
 - **Construcción del Resultado:** El worker construye una estructura `JobResult` que incluye:
@@ -69,7 +82,7 @@ A continuación se detalla el flujo completo desde que se realiza la solicitud h
   - Información de tiempo.
 - **Almacenamiento en Redis:** El resultado se serializa a JSON y se almacena en Redis bajo la clave `result:{job_id}` con un tiempo de expiración de 24 horas.
 
-### 6. Recuperación del Resultado
+### 7. Recuperación del Resultado
 
 - **Consulta al Resultado:** El cliente puede realizar una solicitud `GET` a `/result/{job_id}` para obtener el resultado.
 - **Manejo de Respuestas:**

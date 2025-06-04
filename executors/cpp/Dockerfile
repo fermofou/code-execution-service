@@ -15,4 +15,5 @@ RUN chmod +x /app/execute.sh
 RUN mkdir -p /code && chmod 777 /code
 
 # Run the script when the container starts
-ENTRYPOINT ["/app/execute.sh"]
+# Keep the container alive indefinitely for docker exec (same as Python)
+ENTRYPOINT ["sh", "-c", "while true; do sleep 300; done"]
