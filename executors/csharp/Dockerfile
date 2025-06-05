@@ -19,4 +19,6 @@ COPY execute.sh /app/
 RUN chmod +x /app/execute.sh
 
 # Run the executor when the container starts
-ENTRYPOINT ["/app/execute.sh"]
+#ENTRYPOINT ["/app/execute.sh"]
+# Keep the container alive indefinitely for docker exec (same as Python)
+ENTRYPOINT ["sh", "-c", "while true; do sleep 300; done"]
