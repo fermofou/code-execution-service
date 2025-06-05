@@ -61,7 +61,7 @@ async function main() {
     const singleMode = process.env.SINGLE;
 
     if (!codeUrl) {
-      console.log("STDERR:");
+      //console.log("STDERR:");
       console.log("Error: CODE_URL environment variable not set.");
       process.exit(1);
     }
@@ -82,10 +82,10 @@ async function main() {
       fs.unlinkSync(tempFilePath);
     } catch {}
 
-    console.log("STDOUT:");
+    //console.log("STDOUT:");
     console.log(stdout);
-    console.log("STDERR:");
-    console.log(stderr);
+    //console.log("STDERR:");
+    //console.log(stderr);
   } catch (error) {
     console.log("STDERR:");
     console.log(`Error: ${error.message}`);
