@@ -202,7 +202,7 @@ func connectToDB() {
 func create_submission(userID string, problemID string, status bool, lang string, execTime int64, output string) error {
 	_, err := db.Exec(
 		ctx,
-		"SELECT create_submission($1, $2, $3, $4, $5, $6)",
+		"CALL create_submission($1, $2, $3, $4, $5, $6)",
 		userID, problemID, status, lang, execTime, output,
 	)
 	return err
