@@ -11,5 +11,6 @@ RUN chmod +x /executor/executor.js
 # Create the /code directory where the mounted volume will be
 RUN mkdir -p /code && chmod 777 /code
 
-# Execute the script; the script should accept a file path to execute the submitted code
-CMD ["node", "executor.js"]
+# Keep the container alive for test execution via docker exec
+ENTRYPOINT ["sh", "-c", "while true; do sleep 300; done"]
+
