@@ -57,9 +57,11 @@ type Job struct {
 	Language  string    `json:"language"`
 	Code      string    `json:"code"`
 	Timestamp time.Time `json:"timestamp"`
-	//TestCases string    `json:"testcases"`
-	Inputs    []string            `json:"inputs"`
-	Outputs   []string            `json:"outputs"`
+	Status string        `json:"status"`
+	Inputs    []string   `json:"inputs"`
+	Outputs   []string   `json:"outputs"`
+	UserID    string     `json:"user_id,omitempty"` // Optional user ID for submissions
+	ProblemID string     `json:"problem_id,omitempty"` // Optional problem ID for submissions
 
 }
 
@@ -70,6 +72,11 @@ type JobResult struct {
 	Error     string    `json:"error"`
 	ExecTime  int64     `json:"exec_time_ms"`
 	Timestamp time.Time `json:"timestamp"`
+	TestCases int       `json:"test_cases"` // Number of test cases passed
+	TotalCases int       `json:"total_cases"` // Total number of test cases
+	UserID	   string    `json:"user_id"`
+	ProblemID string    `json:"problem_id"`
+	Language string    `json:"language"` // Language used for the submission
 }
 
 type Reward struct {
@@ -192,6 +199,15 @@ func connectToDB() {
 	}
 }
 
+func create_submission(userID string, problemID string, status bool, lang string, execTime int64, output string) error {
+	_, err := db.Exec(
+		ctx,
+		"SELECT create_submission($1, $2, $3, $4, $5, $6)",
+		userID, problemID, status, lang, execTime, output,
+	)
+	return err
+}
+
 func executeHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -266,6 +282,10 @@ func executeHandler(w http.ResponseWriter, r *http.Request) {
 		Inputs:    req.Inputs,
 		Outputs:   req.Outputs,
 	}
+	if req.UserId != "" {
+		job.UserID = req.UserId
+		job.ProblemID = req.ProblemID
+	}
 
 	jobData, err := json.Marshal(job)
 	if err != nil {
@@ -317,10 +337,29 @@ func resultHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Error retrieving job result", http.StatusInternalServerError)
 		return
 	}
-
 	// Return the result
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(resultData))
+
+	//if resultData with UserID and ProblemID exists, call procedure
+	if strings.Contains(resultData, `"user_id":`) && strings.Contains(resultData, `"problem_id":`) {
+		var job JobResult
+		if err := json.Unmarshal([]byte(resultData), &job); err != nil {
+			log.Printf("Error unmarshaling job result: %v", err)
+			return
+		}
+
+		log.Printf("updating postgreSQL submission for user %s on problem %s", job.UserID, job.ProblemID)
+		var status bool = job.Status == "accept"
+
+		// Call the procedure to handle the submission
+		if err := create_submission(job.UserID, job.ProblemID,status, job.Language,job.ExecTime,job.Output); err != nil {
+			log.Printf("Error handling submission: %v", err)
+		} else {
+			log.Printf("Submission processed successfully for user %s on problem %s", job.UserID, job.ProblemID)
+		}
+	}
+
 }
 
 func healthCheckHandler(w http.ResponseWriter, r *http.Request) {

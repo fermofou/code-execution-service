@@ -34,6 +34,8 @@ type Job struct {
 	Timestamp time.Time `json:"timestamp"`
 	Inputs    []string  `json:"inputs"`
 	Outputs   []string  `json:"outputs"`
+	UserID    string    `json:"user_id"`
+	ProblemID  string    `json:"problem_id"`
 }
 
 // JobResult represents the result of a code execution
@@ -46,6 +48,9 @@ type JobResult struct {
 	Timestamp time.Time `json:"timestamp"`
 	TestCases int 		`json:"test_cases"`
 	TotalCases  int 	`json:"total_cases"`
+	UserID    string    `json:"user_id"`
+	ProblemID  string    `json:"problem_id"`
+	Language  string    `json:"language"`
 }
 
 // HTTP handler for serving code files
@@ -178,6 +183,9 @@ func executeCode(job Job) JobResult {
 					Timestamp: time.Now(),
 					TestCases: i + 1,
 					TotalCases: len(job.Inputs),
+					UserID:    job.UserID,
+					ProblemID: job.ProblemID,
+					Language:  job.Language,
 				}
 			}
 		}
@@ -191,6 +199,9 @@ func executeCode(job Job) JobResult {
 			Timestamp: time.Now(),
 			TestCases: len(job.Inputs),
 			TotalCases: len(job.Inputs),
+			UserID:    job.UserID,
+			ProblemID: job.ProblemID,
+			Language:  job.Language,
     	}
 	}
 
