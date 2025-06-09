@@ -483,6 +483,68 @@ func claimHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+
+func getLeaderboardProblem(w http.ResponseWriter, r *http.Request) {
+	problemId := r.URL.Query().Get("problemId")
+	if problemId == "" {
+		http.Error(w, "Missing problemId", http.StatusBadRequest)
+		return
+	}
+
+	rows, err := db.Query(ctx, `
+		SELECT *
+		FROM (
+			SELECT DISTINCT ON (s.user_id)
+				u.name,
+				s.time AS execution_time
+			FROM
+				submission s
+			LEFT JOIN "User" u ON s.user_id = u.user_id
+			WHERE
+				s.problem_id = $1
+				AND s.correct = true
+			ORDER BY
+				s.user_id,
+				s.time ASC
+		) AS fastest_per_user
+		ORDER BY
+			execution_time ASC;
+	`, problemId)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to fetch leaderboard: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	type ProblemLeaderboard struct {
+		UserName string `json:"user_name"`
+		Time     int64  `json:"time"`
+	}
+
+	var leaderboard []ProblemLeaderboard
+
+	for rows.Next() {
+		var entry ProblemLeaderboard
+		if err := rows.Scan(&entry.UserName, &entry.Time); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to scan row: %v", err), http.StatusInternalServerError)
+			return
+		}
+		leaderboard = append(leaderboard, entry)
+	}
+
+	if err := rows.Err(); err != nil {
+		http.Error(w, fmt.Sprintf("Row iteration error: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(leaderboard); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to encode JSON: %v", err), http.StatusInternalServerError)
+	}
+}
+
+
+
 func getRewardsHandler(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.Query(ctx, "SELECT reward_id, name, description, inventory_count, cost FROM Reward")
 	if err != nil {
