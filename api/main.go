@@ -1498,6 +1498,7 @@ func main() {
 	router.HandleFunc("/admin/claims", getAllClaimsHandler).Methods("GET")
 	router.HandleFunc("/myRewards", getUserClaimsHandler).Methods("GET")
 	router.HandleFunc("/admin/stats", getAdminStats).Methods("GET")
+	router.HandleFunc("/getLeaderboardProblem", getLeaderboardProblem).Methods("GET")
 
 	log.Println("API server running on port 8080")
 	log.Fatal(http.ListenAndServe("0.0.0.0:8080", router))
