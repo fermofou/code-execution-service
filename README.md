@@ -2,6 +2,8 @@
 
 Esta plataforma ha sido diseñada para ejecutar de forma segura y remota fragmentos de código enviados por los usuarios, siendo ideal para entornos de _coding challenges_. Utiliza contenedores Docker para aislar y ejecutar el código, garantizando que cada contenedor se destruya después de la ejecución. Además, está preparada para soportar múltiples usuarios concurrentes, escalando de manera eficiente según la demanda.
 
+## Servicio actualmente no disponible, DB borrada.  SQL Schema disponible 
+
 ## Tabla de Contenidos
 
 - [Introducción](#introducción)
